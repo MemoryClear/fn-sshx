@@ -1,0 +1,129 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <base href="/app/sshx/" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SSH 终端</title>
+  <style>
+{{XTERM_CSS}}
+{{CSS}}
+  </style>
+</head>
+<body>
+  <div id="sidebar">
+    <div id="sidebarInner">
+    <div id="brand">SSH 连接管理器</div>
+    <div id="lock">
+      <div class="auth-title">🔓 输入访问密码</div>
+      <label>访问密码</label>
+      <input id="lockInput" type="password" placeholder="输入访问密码" />
+      <button id="lockBtn">解锁</button>
+      <div id="lockMsg"></div>
+    </div>
+    <div id="setArea" style="display:none;">
+      <div class="auth-title">🔒 设置访问密码</div>
+      <label>设置访问密码（至少4位）</label>
+      <input id="setInput" type="password" placeholder="至少4位" />
+      <input id="setInput2" type="password" placeholder="再次输入密码" />
+      <button id="setBtn">设定并进入</button>
+      <div id="setMsg"></div>
+    </div>
+    <div id="connSearchArea"><input id="connSearch" type="text" placeholder="搜索连接…" /></div>
+    <div id="connList"></div>
+    <div id="sidebarFoot">
+      <button id="addConnBtn">+ 新增连接</button>
+      <div id="importExportBtns">
+        <button id="exportBtn" title="导出连接配置">📤 导出</button>
+        <button id="importBtn" title="导入连接配置">📥 导入</button>
+      </div>
+      <button id="logoutBtn">🔒 锁定</button>
+    </div>
+    </div>
+    <button id="sidebarToggle" title="收起侧栏">‹</button>
+  </div>
+  <button id="sidebarExpand" title="展开侧栏">›</button>
+  <div id="main">
+    <div id="topbar">
+      <input id="host" placeholder="主机 (IP/域名)" />
+      <input id="port" placeholder="端口" value="22" />
+      <input id="user" placeholder="用户名" />
+      <input id="pass" type="password" placeholder="密码(必填)" />
+      <button id="connectBtn">快速链接</button>
+      <button id="diagBtn" title="诊断日志">🔧</button>
+    </div>
+    <div id="tabsBar">
+      <button id="topbarToggle" title="连接表单" style="display:none;">⚡</button>
+      <button id="tabsLeft" class="tabArrow" title="向左滚动">‹</button>
+      <div id="tabs"></div>
+      <button id="tabsRight" class="tabArrow" title="向右滚动">›</button>
+      <button id="closeAllBtn" title="关闭所有标签">× 全部</button>
+    </div>
+    <div id="terminals"></div>
+  </div>
+  <div id="connModal">
+    <div class="modal-box">
+      <h3 id="connModalTitle">新增连接</h3>
+      <label>名称 <input id="connName" type="text" placeholder="连接名称" /></label>
+      <div class="row">
+        <label>主机 <input id="connHost" type="text" placeholder="IP/域名" /></label>
+        <label>端口 <input id="connPort" type="text" value="22" /></label>
+      </div>
+      <div class="row">
+        <label>用户名 <input id="connUser" type="text" placeholder="用户名" /></label>
+        <label>密码 <input id="connPass" type="password" placeholder="必填。编辑时留空则不修改" /></label>
+      </div>
+      <label>分组 <input id="connGroup" type="text" placeholder="可选" /></label>
+      <div id="connTestMsg" style="min-height:16px;font-size:12px;margin:2px 0 6px;"></div>
+      <div class="modal-btns">
+        <button id="connTest">测试连接</button>
+        <button id="connSave">保存</button>
+        <button id="connCancel">取消</button>
+      </div>
+    </div>
+  </div>
+  <div id="diag">
+    <div id="diagHead"><span>诊断日志</span><button id="diagClose" title="收起">×</button></div>
+    <pre id="diagContent">诊断信息…</pre>
+  </div>
+  <!-- 通用确认模态框 -->
+  <div id="confirmModal" style="display:none;">
+    <div class="modal-box" style="width:340px;">
+      <p id="confirmMsg"></p>
+      <div class="modal-btns">
+        <button id="confirmOk">确定</button>
+        <button id="confirmCancel">取消</button>
+      </div>
+    </div>
+  </div>
+  <div id="ctxMenu" style="display:none;position:fixed;background:#2d2d30;border:1px solid #555;border-radius:6px;padding:4px 0;z-index:9000;min-width:140px;box-shadow:0 4px 16px rgba(0,0,0,0.5);">
+    <div class=ctx-item id=ctxTerm>🖥 打开终端</div>
+    <div class=ctx-item id=ctxEdit>✏️ 编辑</div>
+    <div style="border-top:1px solid #444;margin:4px 0;"></div>
+    <div class=ctx-item id=ctxDel style="color:#f48771;">🗑 删除</div>
+  </div>
+<script>
+{{XTERM}}
+  </script>
+  <script>
+{{FIT}}
+  </script>
+  <script>
+(function(){
+  function start(){
+    try { {{APP}} } catch(err){
+      var d=document.getElementById('diagContent'); if(d){ d.textContent='启动失败: '+(err&&err.stack||err); }
+      var d2=document.getElementById('diag'); if(d2) d2.classList.add('open');
+      console.error('sshx boot error', err);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
+  </script>
+  <input type="file" id="importFileInput" accept=".sshx" style="display:none;" />
+</body>
+</html>

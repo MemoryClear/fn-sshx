@@ -1,0 +1,14 @@
+{
+    ".url": {
+        "sshx.Application": {
+            "title": "SSH 终端",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "http",
+            "gatewayPrefix": "/app/sshx",
+            "gatewaySocket": "app.sock",
+            "url": "/app/sshx",
+            "allUsers": true
+        }
+    }
+}
