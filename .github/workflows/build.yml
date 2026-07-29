@@ -16,14 +16,14 @@ jobs:
         run: |
           sudo cp ./fnpack /usr/local/bin/fnpack
           sudo chmod +x /usr/local/bin/fnpack
-          fnpack version
+          fnpack --help
       
       - name: Build single-file UI
         shell: pwsh
         run: ./build_single.ps1
       
       - name: Build fpk package
-        run: fnpack build -d .
+        run: fnpack build
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
