@@ -1,9 +1,9 @@
 $ErrorActionPreference='Stop'
-$ui = "F:\workspace\fnos-ssh-tool-dev\sshx\app\ui"
+$ui = Join-Path $PSScriptRoot 'app/ui'
 $utf8nb = New-Object System.Text.UTF8Encoding($false)
 
 # 读取模板（含中文骨架），UTF-8 无 BOM
-$tmpl = [System.IO.File]::ReadAllText("$ui\template.html", $utf8nb)
+$tmpl = [System.IO.File]::ReadAllText((Join-Path $ui 'template.html'), $utf8nb)
 
 # xterm.umd.js 末尾 sourceMappingURL 注释里有字面 </script>，
 # 直接内联会让浏览器提前闭合 <script>，必须转义为 <\/script>。
@@ -11,15 +11,15 @@ $tmpl = [System.IO.File]::ReadAllText("$ui\template.html", $utf8nb)
 function Esc-Script([string]$s){ return $s.Replace('</script>','<\/script>') }
 function Esc-Style([string]$s) { return $s.Replace('</style>', '<\/style>') }
 
-$xterm    = Esc-Script ([System.IO.File]::ReadAllText("$ui\lib\xterm.umd.js", $utf8nb))
-$fit      = Esc-Script ([System.IO.File]::ReadAllText("$ui\lib\fit.umd.js", $utf8nb))
-$app      = Esc-Script ([System.IO.File]::ReadAllText("$ui\app.js", $utf8nb))
-$xtermCss = Esc-Style  ([System.IO.File]::ReadAllText("$ui\lib\xterm.css", $utf8nb))
-$css      = Esc-Style  ([System.IO.File]::ReadAllText("$ui\style.css", $utf8nb))
+$xterm    = Esc-Script ([System.IO.File]::ReadAllText((Join-Path $ui 'lib/xterm.umd.js'), $utf8nb))
+$fit      = Esc-Script ([System.IO.File]::ReadAllText((Join-Path $ui 'lib/fit.umd.js'), $utf8nb))
+$app      = Esc-Script ([System.IO.File]::ReadAllText((Join-Path $ui 'app.js'), $utf8nb))
+$xtermCss = Esc-Style  ([System.IO.File]::ReadAllText((Join-Path $ui 'lib/xterm.css'), $utf8nb))
+$css      = Esc-Style  ([System.IO.File]::ReadAllText((Join-Path $ui 'style.css'), $utf8nb))
 
 $html = $tmpl.Replace('{{XTERM_CSS}}', $xtermCss).Replace('{{CSS}}', $css).Replace('{{XTERM}}', $xterm).Replace('{{FIT}}', $fit).Replace('{{APP}}', $app)
 
-[System.IO.File]::WriteAllText("$ui\index.html", $html, $utf8nb)
+[System.IO.File]::WriteAllText((Join-Path $ui 'index.html'), $html, $utf8nb)
 
 # 诊断
 $rawClose = ([regex]::Matches($html, '</script>')).Count
