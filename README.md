@@ -1,5 +1,4 @@
 # SSHX - fnOS 原生 SSH 终端客户端
-<img width="1097" height="730" alt="image" src="https://github.com/user-attachments/assets/22ba17b5-05bd-436a-a0e2-eb4d891ba915" />
 
 > 多标签 SSH 终端，支持连接保存、密码加密、导入导出。
 
@@ -42,3 +41,11 @@ CI 推送到 master 后会自动构建并发布 Release。
 ## License
 
 MIT
+
+## 效果图
+<img width="1098" height="638" alt="2" src="https://github.com/user-attachments/assets/5986c2ee-3994-4543-b641-8b58ad40aff9" />
+
+<img width="1097" height="633" alt="4" src="https://github.com/user-attachments/assets/3a0fa689-0dc8-4342-b142-6b48dd2a8984" />
+
+<img width="1098" height="637" alt="3" src="https://github.com/user-attachments/assets/7c474f52-1bc9-4209-a567-c313e1561839" />
+
