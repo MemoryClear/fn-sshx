@@ -10,6 +10,18 @@
     var dot = el('tdot_' + tabId);
     if (dot) dot.style.background = color || '#888';
   }
+  // 统一的断开提示函数（防止重复显示）
+  function showDisconnectPrompt(tabId, term, errorMsg) {
+    if (!tabs[tabId] || tabs[tabId]._disconnectShown) return;
+    tabs[tabId]._disconnectShown = true;
+    term.writeln('');
+    if (errorMsg) {
+      term.writeln('\x1b[31m' + errorMsg + '\x1b[0m');
+    }
+    term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
+    term.writeln('\x1b[33mSession stopped\x1b[0m');
+    term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
+  }
   function esc(str) {
     return String(str).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'");
   }
@@ -299,6 +311,19 @@
 
     var term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: 'Consolas, "Courier New", monospace', theme: { background: '#1e1e1e', foreground: '#d4d4d4', cursor: '#aaaaaa' }, allowProposedApi: true });
     term.open(termDiv);
+    // 拦截 R 键重连（xterm 会阻止事件冒泡到 document）
+    term.attachCustomKeyEventHandler(function (e) {
+      if (e.type !== 'keydown' || (e.key !== 'r' && e.key !== 'R')) return true;
+      if (e.ctrlKey || e.altKey || e.metaKey) return true;
+      if (!activeId || !tabs[activeId] || tabs[activeId].isWelcome) return true;
+      var tab = tabs[activeId];
+      var dot = document.getElementById('tdot_' + activeId);
+      var c = dot ? dot.style.background.replace(/\s/g, '') : '';
+      var isDown = (c === 'rgb(136,136,136)' || c === '#888' || c === 'rgb(231,76,60)' || c === '#e74c3c');
+      if (!isDown) return true;
+      reconnectActive();
+      return false;
+    });
     var fitAddon = null;
     try {
       var FitAddonClass = (typeof FitAddon !== 'undefined' && FitAddon.FitAddon) ? FitAddon.FitAddon : FitAddon;
@@ -374,6 +399,7 @@
             var durationInfo = m.duration ? ' (连接时长: ' + m.duration + ')' : '';
             diag('[SSH] 连接关闭 tab=' + id + durationInfo);
             setDot(id, '#888');
+            showDisconnectPrompt(id, term, null);
           }
           else if (m.type === 'error') {
             var errMsg = m.data || m.message || '未知';
@@ -385,6 +411,7 @@
               setTimeout(attemptConnect, retryDelay);
             } else {
               setDot(id, '#e74c3c');
+              showDisconnectPrompt(id, term, 'Network error: ' + errMsg);
             }
           }
         };
@@ -395,6 +422,13 @@
         ws.onclose = function () {
           diag('[SSH] WebSocket 关闭 tab=' + id);
           setDot(id, '#888');
+          // 如果还没显示过断开提示，则显示（防止与 close 消息重复）
+          if (!tabs[id]._disconnectShown) {
+            tabs[id]._disconnectShown = true;
+            term.writeln('');
+            term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
+            term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
+          }
         };
 
         term.onData(function (data) {
@@ -734,11 +768,117 @@
     el('confirmCancel').onclick = function () { el('confirmModal').style.display = 'none'; };
   }
 
-    document.addEventListener('keydown', function (e) {
+  function reconnectActive() {
+    if (!activeId || !tabs[activeId] || tabs[activeId].isWelcome) return;
+    var tab = tabs[activeId];
+    if (!tab.conn) { showMsg('无法重连：缺少连接信息'); return; }
+    // 检查 dot 颜色：只在断开(灰#888)或错误(红#e74c3c)时允许
+    var dot = document.getElementById('tdot_' + activeId);
+    var c = dot ? dot.style.background.replace(/\s/g, '') : '';
+    var isDown = (c === 'rgb(136,136,136)' || c === '#888' || c === 'rgb(231,76,60)' || c === '#e74c3c');
+    if (!isDown) { showMsg('当前连接正常，无需重连'); return; }
+
+    var conn = tab.conn;
+    diag('[reconnect] tab=' + activeId + ' saved=' + !!conn.saved);
+    tab.term.writeln('\r\n\x1b[33m⚡ 正在重连...\x1b[0m');
+    setDot(activeId, '#ffa500');
+
+    // 关闭旧 WebSocket
+    if (tab.ws) {
+      try { tab.ws.onclose = null; tab.ws.close(); } catch(e) {}
+      tab.ws = null;
+    }
+
+    var ws;
+    try {
+      ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/app/sshx/ws');
+    } catch(e) {
+      tab.term.writeln('\x1b[31m重连失败: WebSocket 创建失败\x1b[0m');
+      setDot(activeId, '#e74c3c');
+      return;
+    }
+    tab.ws = ws;
+    wsMap[activeId] = ws;
+
+    var currentId = activeId; // 捕获当前 id，避免重连期间切换 tab 导致串线
+
+    ws.onopen = function () {
+      setDot(currentId, '#4caf50');
+      tabs[currentId]._disconnectShown = false; // 重置断开标记
+      if (conn.saved) {
+        ws.send(JSON.stringify({ type: 'connectSaved', id: conn.id }));
+      } else {
+        ws.send(JSON.stringify({ type: 'connect', host: conn.host, port: conn.port, username: conn.user, password: conn.pass || '' }));
+      }
+    };
+    ws.onmessage = function (e) {
+      var m = JSON.parse(e.data);
+      if (m.type === 'data') { tab.term.write(atob(m.data)); }
+      else if (m.type === 'ready') {
+        tab.term.writeln('\r\n\x1b[32m✓ 已重连\x1b[0m\r\n');
+        diag('[reconnect] 重连成功 tab=' + currentId);
+      }
+      else if (m.type === 'close' || m.type === 'closed') {
+        var durationInfo = m.duration ? ' (连接时长: ' + m.duration + ')' : '';
+        diag('[reconnect] 连接关闭 tab=' + currentId + durationInfo);
+        setDot(currentId, '#888');
+        if (!tabs[currentId]._disconnectShown) {
+          tabs[currentId]._disconnectShown = true;
+          tab.term.writeln('');
+          tab.term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
+          tab.term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
+        }
+      }
+      else if (m.type === 'error') {
+        setDot(currentId, '#e74c3c');
+        tab.term.writeln('\r\n\x1b[31m✗ 重连失败: ' + (m.data || m.message || '未知') + '\x1b[0m');
+        if (!tabs[currentId]._disconnectShown) {
+          tabs[currentId]._disconnectShown = true;
+          tab.term.writeln('');
+          tab.term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
+          tab.term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
+        }
+      }
+    };
+    ws.onerror = function () { setDot(currentId, '#e74c3c'); };
+    ws.onclose = function () {
+      diag('[reconnect] WebSocket 关闭 tab=' + currentId);
+      setDot(currentId, '#888');
+      if (!tabs[currentId]._disconnectShown) {
+        tabs[currentId]._disconnectShown = true;
+        tab.term.writeln('');
+        tab.term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
+        tab.term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
+      }
+    };
+
+    // 重新绑定输入/resize（旧 handler 引用已关闭的 ws，不会发送数据）
+    tab.term.onData(function (data) {
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'data', data: btoa(data) }));
+    });
+    tab.term.onResize(function (size) {
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
+    });
+  }
+
+  document.addEventListener('keydown', function (e) {
     if (e.ctrlKey && e.key === 'c' && activeId && tabs[activeId] && !tabs[activeId].isWelcome) {
       // Let xterm handle it
     }
     if (e.alt && e.key === 'w') { e.preventDefault(); if (activeId) closeTab(activeId); }
+    // R 键重连：仅在焦点不在输入框、且当前 tab 断开时触发
+    if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      var tag = (e.target && e.target.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (activeId && tabs[activeId] && !tabs[activeId].isWelcome) {
+        var dot = document.getElementById('tdot_' + activeId);
+        var c = dot ? dot.style.background.replace(/\s/g, '') : '';
+        if (c === 'rgb(136,136,136)' || c === '#888' || c === 'rgb(231,76,60)' || c === '#e74c3c') {
+          e.preventDefault();
+          reconnectActive();
+        }
+      }
+    }
   });
 
   // 初始加载:始终先查询服务端锁状态,不依赖本地 token 判断登录态
