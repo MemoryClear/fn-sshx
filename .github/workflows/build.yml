@@ -12,17 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get version
+      - name: Get version from manifest
         id: version
         run: |
           VERSION=$(grep '^version\s*=' manifest | sed 's/version\s*=\s*//' | tr -d ' ')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
 
       - name: Setup fnpack
         run: |
           sudo cp ./fnpack /usr/local/bin/fnpack
           sudo chmod +x /usr/local/bin/fnpack
-          fnpack version
+          fnpack --help
 
       - name: Install Node.js dependencies
         run: npm install
@@ -30,10 +31,22 @@ jobs:
 
       - name: Build single-file UI
         shell: pwsh
-        run: ./build_single.ps1
+        run: |
+          echo "=== Verifying build_single.ps1 exists ==="
+          ls -la build_single.ps1
+          echo "=== Running build_single.ps1 ==="
+          ./build_single.ps1
+          echo "=== Verifying index.html generated ==="
+          ls -la app/ui/index.html
 
       - name: Build fpk package
-        run: fnpack build -d .
+        run: fnpack build
+
+      - name: Verify fpk output
+        run: |
+          ls -lh sshx.fpk
+          echo "=== manifest ==="
+          cat manifest
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -43,5 +56,6 @@ jobs:
           files: sshx.fpk
           draft: false
           prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
