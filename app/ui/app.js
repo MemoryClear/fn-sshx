@@ -18,7 +18,7 @@
     if (!box) {
       box = document.createElement('div');
       box.id = 'msgBox';
-      box.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 20px;border-radius:6px;z-index:99999;opacity:0;transition:opacity 0.3s;';
+      box.style.cssText = 'position:fixed;top:42px;left:0;right:0;background:#333;color:#fff;padding:8px 20px;text-align:center;z-index:99999;opacity:0;transition:opacity 0.3s;font-size:13px;';
       document.body.appendChild(box);
     }
     box.textContent = msg;
@@ -37,20 +37,8 @@
 
   // 统一的断开提示函数（防止重复显示）
   function showDisconnectPrompt(tabId, term, errorMsg) {
-    if (!tabs[tabId] || tabs[tabId]._disconnectShown) return;
-    tabs[tabId]._disconnectShown = true;
-    term.writeln('');
-    if (errorMsg) {
-      term.writeln('\x1b[31m' + errorMsg + '\x1b[0m');
-    }
-    term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
-    term.writeln('\x1b[33mSession stopped\x1b[0m');
-    term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
-  }
-
-  // 统一的断开提示函数（防止重复显示）
-  function showDisconnectPrompt(tabId, term, errorMsg) {
-    if (!tabs[tabId] || tabs[tabId]._disconnectShown) return;
+    if (!tabs[tabId]) return;
+    if (!errorMsg && tabs[tabId]._disconnectShown) return;
     tabs[tabId]._disconnectShown = true;
     term.writeln('');
     if (errorMsg) {
@@ -193,19 +181,19 @@
     if (!pw) return;
     api('POST', '/api/login', { password: pw }).then(function (data) {
       if (data.ok) { setToken(data.token); locked = true; loadConns(); }
-      else { el('lockMsg').textContent = data.error || '密码错误'; setToken(''); }
-    }).catch(function () { el('lockMsg').textContent = '验证失败'; setToken(''); });
+      else { showMsg(data.error || '密码错误'); setToken(''); }
+    }).catch(function () { showMsg('验证失败'); setToken(''); });
   };
 
   el('setBtn').onclick = function () {
     var pw = el('setInput').value;
     var pw2 = el('setInput2').value;
-    if (pw.length < 4) { el('setMsg').textContent = '至少4位'; return; }
-    if (pw !== pw2) { el('setMsg').textContent = '两次密码不一致'; return; }
+    if (pw.length < 4) { showMsg('至少4位'); return; }
+    if (pw !== pw2) { showMsg('两次密码不一致'); return; }
     api('POST', '/api/settings', { appPassword: pw }).then(function (data) {
       if (data.ok && data.token) { setToken(data.token); locked = true; loadConns(); }
-      else { el('setMsg').textContent = data.error || '设置失败'; }
-    }).catch(function () { el('setMsg').textContent = '请求失败'; });
+      else { showMsg(data.error || '设置失败'); }
+    }).catch(function () { showMsg('请求失败'); });
   };
 
   // 锁定：只清 token，不动已打开的 tab
@@ -394,7 +382,10 @@
         ws.onopen = function () {
           diag('[SSH] WebSocket 打开 tab=' + id);
           setDot(id, '#4caf50');
-          tabs[id]._disconnectShown = false; // 重置断开标记
+          if (retryCount === 1) {
+            tabs[id]._disconnectShown = false;
+            tabs[id]._connected = false;
+          }
           if (conn.saved) {
             ws.send(JSON.stringify({ type: 'connectSaved', id: conn.id }));
             diag('[SSH] 发送 connectSaved id=' + conn.id);
@@ -409,17 +400,20 @@
           else if (m.type === 'ready') {
             diag('[SSH] 已连接 tab=' + id + ' mode=' + (m.mode || 'ssh'));
             retryCount = 0; // 成功后重置
+            tabs[id]._disconnectShown = false; // 重置断开提示标志
+            tabs[id]._connected = true; // 标记已成功连接
           }
           else if (m.type === 'close' || m.type === 'closed') {
             var durationInfo = m.duration ? ' (连接时长: ' + m.duration + ')' : '';
             diag('[SSH] 连接关闭 tab=' + id + durationInfo);
             setDot(id, '#888');
+            if (!tabs[id]._connected) return; // 未成功连接过，不显示提示
             showDisconnectPrompt(id, term, null);
           }
           else if (m.type === 'error') {
             var errMsg = m.data || m.message || '未知';
             diag('[SSH] 错误 tab=' + id + ' ' + errMsg + ' retryable=' + m.retryable);
-            if (m.retryable && retryCount < maxRetries) {
+            if (m.retryable && retryCount < maxRetries && !tabs[id]._connected) {
               diag('[SSH] 自动重试 ' + retryCount + '/' + maxRetries);
               setDot(id, '#ffa500');
               ws.close();
@@ -437,16 +431,20 @@
         ws.onclose = function () {
           diag('[SSH] WebSocket 关闭 tab=' + id);
           setDot(id, '#888');
+          if (!tabs[id]._connected) return; // 未成功连接过，不显示提示
           showDisconnectPrompt(id, term, null);
         };
-
-        term.onData(function (data) {
-          if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'data', data: btoa(data) }));
-        });
-        term.onResize(function (size) {
-          if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
-        });
       }
+
+      // 注册终端输入/resize处理器（使用tabs[id].ws引用当前WebSocket）
+      var onDataDisposable = term.onData(function (data) {
+        if (tabs[id].ws && tabs[id].ws.readyState === 1) tabs[id].ws.send(JSON.stringify({ type: 'data', data: btoa(data) }));
+      });
+      var onResizeDisposable = term.onResize(function (size) {
+        if (tabs[id].ws && tabs[id].ws.readyState === 1) tabs[id].ws.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
+      });
+      tabs[id]._onDataDisposable = onDataDisposable;
+      tabs[id]._onResizeDisposable = onResizeDisposable;
 
       attemptConnect();
     }
@@ -797,6 +795,7 @@
       try { tab.ws.onclose = null; tab.ws.close(); } catch(e) {}
       tab.ws = null;
     }
+    tabs[activeId]._connected = false; // 重置连接状态标记
 
     var ws;
     try {
@@ -814,6 +813,7 @@
     ws.onopen = function () {
       setDot(currentId, '#4caf50');
       tabs[currentId]._disconnectShown = false; // 重置断开标记
+      tabs[currentId]._connected = false; // 重连开始时重置，等待 ready 确认
       if (conn.saved) {
         ws.send(JSON.stringify({ type: 'connectSaved', id: conn.id }));
       } else {
@@ -825,6 +825,7 @@
       if (m.type === 'data') { tab.term.write(atob(m.data)); }
       else if (m.type === 'ready') {
         tab.term.writeln('\r\n\x1b[32m✓ 已重连\x1b[0m\r\n');
+        tabs[currentId]._connected = true;
         diag('[reconnect] 重连成功 tab=' + currentId);
       }
       else if (m.type === 'close' || m.type === 'closed') {
@@ -835,7 +836,6 @@
       }
       else if (m.type === 'error') {
         setDot(currentId, '#e74c3c');
-        tab.term.writeln('\r\n\x1b[31m✗ 重连失败: ' + (m.data || m.message || '未知') + '\x1b[0m');
         showDisconnectPrompt(currentId, tab.term, 'Network error: ' + (m.data || m.message || '未知'));
       }
     };
@@ -845,14 +845,6 @@
       setDot(currentId, '#888');
       showDisconnectPrompt(currentId, tab.term, null);
     };
-
-    // 重新绑定输入/resize（旧 handler 引用已关闭的 ws，不会发送数据）
-    tab.term.onData(function (data) {
-      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'data', data: btoa(data) }));
-    });
-    tab.term.onResize(function (size) {
-      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
-    });
   }
 
   document.addEventListener('keydown', function (e) {
