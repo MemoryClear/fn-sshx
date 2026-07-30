@@ -1,10 +1,9 @@
 # SSHX - fnOS 原生 SSH 终端客户端
+<img width="1097" height="730" alt="image" src="https://github.com/user-attachments/assets/22ba17b5-05bd-436a-a0e2-eb4d891ba915" />
 
 > 多标签 SSH 终端，支持连接保存、密码加密、导入导出。
 
 运行在 fnOS 上的轻量 SSH 终端客户端，基于 fnOS 原生 fpk 架构。
-
-<img width="1097" height="730" alt="image" src="https://github.com/user-attachments/assets/22ba17b5-05bd-436a-a0e2-eb4d891ba915" />
 
 ## 功能
 
