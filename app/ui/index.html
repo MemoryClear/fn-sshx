@@ -620,18 +620,6 @@ body { overflow: hidden; }
     var dot = el('tdot_' + tabId);
     if (dot) dot.style.background = color || '#888';
   }
-  // 统一的断开提示函数（防止重复显示）
-  function showDisconnectPrompt(tabId, term, errorMsg) {
-    if (!tabs[tabId] || tabs[tabId]._disconnectShown) return;
-    tabs[tabId]._disconnectShown = true;
-    term.writeln('');
-    if (errorMsg) {
-      term.writeln('\x1b[31m' + errorMsg + '\x1b[0m');
-    }
-    term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
-    term.writeln('\x1b[33mSession stopped\x1b[0m');
-    term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
-  }
   function esc(str) {
     return String(str).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'");
   }
@@ -656,6 +644,32 @@ body { overflow: hidden; }
   var sidebarCollapsed = false;
   var searchQuery = '';
   var editingId = null;
+
+  // 统一的断开提示函数（防止重复显示）
+  function showDisconnectPrompt(tabId, term, errorMsg) {
+    if (!tabs[tabId] || tabs[tabId]._disconnectShown) return;
+    tabs[tabId]._disconnectShown = true;
+    term.writeln('');
+    if (errorMsg) {
+      term.writeln('\x1b[31m' + errorMsg + '\x1b[0m');
+    }
+    term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
+    term.writeln('\x1b[33mSession stopped\x1b[0m');
+    term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
+  }
+
+  // 统一的断开提示函数（防止重复显示）
+  function showDisconnectPrompt(tabId, term, errorMsg) {
+    if (!tabs[tabId] || tabs[tabId]._disconnectShown) return;
+    tabs[tabId]._disconnectShown = true;
+    term.writeln('');
+    if (errorMsg) {
+      term.writeln('\x1b[31m' + errorMsg + '\x1b[0m');
+    }
+    term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
+    term.writeln('\x1b[33mSession stopped\x1b[0m');
+    term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
+  }
   function getToken() { return localStorage.getItem('sshx_token') || ''; }
   function setToken(t) {
     if (t) localStorage.setItem('sshx_token', t); else localStorage.removeItem('sshx_token');
@@ -990,6 +1004,7 @@ body { overflow: hidden; }
         ws.onopen = function () {
           diag('[SSH] WebSocket 打开 tab=' + id);
           setDot(id, '#4caf50');
+          tabs[id]._disconnectShown = false; // 重置断开标记
           if (conn.saved) {
             ws.send(JSON.stringify({ type: 'connectSaved', id: conn.id }));
             diag('[SSH] 发送 connectSaved id=' + conn.id);
@@ -1032,13 +1047,7 @@ body { overflow: hidden; }
         ws.onclose = function () {
           diag('[SSH] WebSocket 关闭 tab=' + id);
           setDot(id, '#888');
-          // 如果还没显示过断开提示，则显示（防止与 close 消息重复）
-          if (!tabs[id]._disconnectShown) {
-            tabs[id]._disconnectShown = true;
-            term.writeln('');
-            term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
-            term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
-          }
+          showDisconnectPrompt(id, term, null);
         };
 
         term.onData(function (data) {
@@ -1432,34 +1441,19 @@ body { overflow: hidden; }
         var durationInfo = m.duration ? ' (连接时长: ' + m.duration + ')' : '';
         diag('[reconnect] 连接关闭 tab=' + currentId + durationInfo);
         setDot(currentId, '#888');
-        if (!tabs[currentId]._disconnectShown) {
-          tabs[currentId]._disconnectShown = true;
-          tab.term.writeln('');
-          tab.term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
-          tab.term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
-        }
+        showDisconnectPrompt(currentId, tab.term, null);
       }
       else if (m.type === 'error') {
         setDot(currentId, '#e74c3c');
         tab.term.writeln('\r\n\x1b[31m✗ 重连失败: ' + (m.data || m.message || '未知') + '\x1b[0m');
-        if (!tabs[currentId]._disconnectShown) {
-          tabs[currentId]._disconnectShown = true;
-          tab.term.writeln('');
-          tab.term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
-          tab.term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
-        }
+        showDisconnectPrompt(currentId, tab.term, 'Network error: ' + (m.data || m.message || '未知'));
       }
     };
     ws.onerror = function () { setDot(currentId, '#e74c3c'); };
     ws.onclose = function () {
       diag('[reconnect] WebSocket 关闭 tab=' + currentId);
       setDot(currentId, '#888');
-      if (!tabs[currentId]._disconnectShown) {
-        tabs[currentId]._disconnectShown = true;
-        tab.term.writeln('');
-        tab.term.writeln('\x1b[90m────────────────────────────────────────\x1b[0m');
-        tab.term.writeln('\x1b[33m  Press R to restart session\x1b[0m');
-      }
+      showDisconnectPrompt(currentId, tab.term, null);
     };
 
     // 重新绑定输入/resize（旧 handler 引用已关闭的 ws，不会发送数据）
