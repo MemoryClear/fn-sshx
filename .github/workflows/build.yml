@@ -2,7 +2,8 @@ name: Build fpk
 
 on:
   push:
-    branches: [master]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -15,10 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get version from manifest
+      - name: Get version from tag
         id: version
         run: |
-          VERSION=$(grep '^version\s*=' manifest | sed 's/version\s*=\s*//' | tr -d ' ')
+          VERSION=${GITHUB_REF_NAME#v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Extracted version: $VERSION"
 
