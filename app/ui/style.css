@@ -140,6 +140,7 @@ body { display: flex; }
   border: none; cursor: pointer; font-size: 12px;
 }
 #closeAllBtn:hover { color: #fff; background: #5a3a3a; }
+#closeAllBtn:disabled { color: #555; cursor: default; }
 
 /* ---- 终端区 ---- */
 #terminals { flex: 1 1 auto; position: relative; background: #1e1e1e; overflow: hidden; min-height: 0; }

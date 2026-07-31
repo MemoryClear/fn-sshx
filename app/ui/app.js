@@ -352,13 +352,7 @@
     };
 
     if (isWelcome) {
-      term.writeln('\x1b[1;32m=== SSHX 终端 ===\x1b[0m');
-      term.writeln('');
-      term.writeln('  \x1b[36m快速连接\x1b[0m:填写上方主机/端口/用户名/密码,点击「快速链接」');
-      term.writeln('  \x1b[36m连接管理\x1b[0m:解锁后点击左侧列表打开已保存连接');
-      term.writeln('  \x1b[36m新增连接\x1b[0m:解锁后点击左下角「+ 新增连接」保存');
-      term.writeln('');
-      term.writeln('  \x1b[33m提示:右键连接可删除\x1b[0m');
+      if (typeof renderWelcome === 'function') renderWelcome(term);
       activateTab(id);
       return;
     }
@@ -502,6 +496,7 @@
     }
     scrollTabsIntoView();
     updateTabsScrollState();
+    updateCloseAllBtn();
     diag('[activateTab] ====== 完成激活 activeId=' + activeId + ' ======');
   }
 
@@ -605,6 +600,7 @@
       }
     }
     updateTabsScrollState();
+    updateCloseAllBtn();
     diag('[doClose] === 完成关闭 ===');
   }
 
@@ -640,18 +636,26 @@
         delete wsMap[id];
       }
     });
-    // 如果之前激活的 tab 被关了，激活欢迎标签（如果存在）；否则新建欢迎标签
-    if (activeId !== welcomeId) {
+    // 全部关闭后激活欢迎标签
+    if (welcomeId && tabs[welcomeId]) {
+      // 已有欢迎标签：正确调用 activateTab 使其可见
       activeId = welcomeId;
-      if (welcomeId && tabs[welcomeId]) {
-        var div = document.getElementById('tab_' + welcomeId);
-        if (div) div.classList.add('active');
-      } else if (!noWelcome) {
-        newTab('欢迎', true);
-      }
+      activateTab(welcomeId);
+    } else if (!noWelcome) {
+      // 没有欢迎标签则新建（newTab 内部已 activateTab）
+      newTab('欢迎', true);
     }
-    if (!noWelcome && !welcomeId) newTab('欢迎', true);
     updateTabsScrollState();
+    updateCloseAllBtn();
+  }
+
+  // 关闭全部按钮：只有欢迎 tab 时禁用
+  function updateCloseAllBtn() {
+    var btn = el('closeAllBtn');
+    if (!btn) return;
+    var tabCount = Object.keys(tabs).length;
+    var onlyWelcome = (tabCount === 1 && Object.values(tabs).some(function(t){ return t.isWelcome; }));
+    btn.disabled = onlyWelcome;
   }
 
   el('closeAllBtn').onclick = function () {
@@ -664,8 +668,8 @@
   el('tabsRight').onclick = function () { var b = el('tabs'); b.scrollBy({ left: 120, behavior: 'smooth' }); setTimeout(updateTabsScrollState, 350); };
   el('tabs').addEventListener('scroll', updateTabsScrollState);
   window.addEventListener('resize', updateTabsScrollState);
-  // 初始化箭头状态
-  setTimeout(updateTabsScrollState, 0);
+  // 初始化箭头/关闭全部按钮状态
+  setTimeout(function(){ updateTabsScrollState(); updateCloseAllBtn(); }, 0);
 
   el('diagBtn').onclick = function () { el('diag').classList.toggle('open'); };
   el('diagClose').onclick = function () { el('diag').classList.remove('open'); };

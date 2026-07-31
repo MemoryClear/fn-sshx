@@ -13,11 +13,12 @@ function Esc-Style([string]$s) { return $s.Replace('</style>', '<\/style>') }
 
 $xterm    = Esc-Script ([System.IO.File]::ReadAllText((Join-Path $ui 'lib/xterm.umd.js'), $utf8nb))
 $fit      = Esc-Script ([System.IO.File]::ReadAllText((Join-Path $ui 'lib/fit.umd.js'), $utf8nb))
+$welcome  = Esc-Script ([System.IO.File]::ReadAllText((Join-Path $ui 'welcome.js'), $utf8nb))
 $app      = Esc-Script ([System.IO.File]::ReadAllText((Join-Path $ui 'app.js'), $utf8nb))
 $xtermCss = Esc-Style  ([System.IO.File]::ReadAllText((Join-Path $ui 'lib/xterm.css'), $utf8nb))
 $css      = Esc-Style  ([System.IO.File]::ReadAllText((Join-Path $ui 'style.css'), $utf8nb))
 
-$html = $tmpl.Replace('{{XTERM_CSS}}', $xtermCss).Replace('{{CSS}}', $css).Replace('{{XTERM}}', $xterm).Replace('{{FIT}}', $fit).Replace('{{APP}}', $app)
+$html = $tmpl.Replace('{{XTERM_CSS}}', $xtermCss).Replace('{{CSS}}', $css).Replace('{{XTERM}}', $xterm).Replace('{{FIT}}', $fit).Replace('{{WELCOME}}', $welcome).Replace('{{APP}}', $app)
 
 [System.IO.File]::WriteAllText((Join-Path $ui 'index.html'), $html, $utf8nb)
 
@@ -28,5 +29,5 @@ $rawStyle = ([regex]::Matches($html, '</style>')).Count
 $escStyle = ([regex]::Matches($html, '<\\/style>')).Count
 Write-Output ("单文件生成: 字节={0}  裸 </script>={1}  转义 <\/script>={2}  裸 </style>={3}  转义 <\/style>={4}" -f $html.Length,$rawClose,$escClose,$rawStyle,$escStyle)
 Write-Output ("前4字节 (期望 3C 21 44 4F = <!DO): {0}" -f (([byte[]][char[]]$html.Substring(0,4) | ForEach-Object {'{0:X2}' -f $_}) -join ' '))
-$probes = @('id="sidebar"','id="brand"','id="logoutBtn"','id="addConnBtn"','id="connectBtn"','id="terminals"','id="connModal"','id="diag"')
+$probes = @('id="sidebar"','id="brand"','id="logoutBtn"','id="addConnBtn"','id="connectBtn"','id="terminals"','id="connModal"','id="diag"','renderWelcome')
 foreach($p in $probes){ Write-Output ("  $p : {0}" -f ($html -match [regex]::Escape($p))) }
