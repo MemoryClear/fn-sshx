@@ -304,7 +304,9 @@
     var div = document.createElement('div');
     div.id = 'tab_' + id;
     div.className = 'tab' + (isWelcome ? ' welcome-tab' : '');
-    div.innerHTML = '<span class="tab-dot" id="tdot_' + id + '"></span><span class="tab-label">' + esc(label) + '</span><button class="tab-close">×</button>';
+    // 欢迎标签不渲染关闭按钮
+    var displayLabel = (isWelcome ? '🏠 ' : '') + label;
+    div.innerHTML = '<span class="tab-dot" id="tdot_' + id + '"></span><span class="tab-label">' + esc(displayLabel) + '</span>' + (isWelcome ? '' : '<button class="tab-close">×</button>');
     el('tabs').appendChild(div);
     var termDiv = document.createElement('div');
     termDiv.id = 'term_' + id;
@@ -341,7 +343,8 @@
     }
     tabs[id] = { term: term, termDiv: termDiv, ws: null, conn: conn, label: label, isWelcome: !!isWelcome, fitAddon: fitAddon };
 
-    div.querySelector('.tab-close').onclick = function () { closeTab(id); };
+    var closeBtn = div.querySelector('.tab-close');
+    if (closeBtn) closeBtn.onclick = function () { closeTab(id); };
     div.onclick = function () {
       diag('[click] tab=' + id + ' exists=' + !!tabs[id]);
       if (tabs[id]) activateTab(id);
@@ -498,6 +501,7 @@
       }, 50);
     }
     scrollTabsIntoView();
+    updateTabsScrollState();
     diag('[activateTab] ====== 完成激活 activeId=' + activeId + ' ======');
   }
 
@@ -507,9 +511,27 @@
     if (active) active.scrollIntoView({ inline: 'nearest', behavior: 'smooth', block: 'nearest' });
   }
 
+  // 根据是否可滚动更新左右箭头按钮的可用状态
+  function updateTabsScrollState() {
+    var bar = el('tabs');
+    var left = el('tabsLeft');
+    var right = el('tabsRight');
+    if (!bar || !left || !right) return;
+    var maxScroll = bar.scrollWidth - bar.clientWidth;
+    var canLeft = bar.scrollLeft > 1;
+    var canRight = bar.scrollLeft < (maxScroll - 1);
+    left.disabled = !canLeft;
+    right.disabled = !canRight;
+    // 完全不需要滚动时隐藏箭头按钮
+    left.style.display = (canLeft || canRight) ? '' : 'none';
+    right.style.display = (canLeft || canRight) ? '' : 'none';
+  }
+
   function closeTab(id, force) {
     var tab = tabs[id];
     if (!tab) return;
+    // 欢迎标签不允许关闭
+    if (tab.isWelcome) { diag('[closeTab] 拒绝关闭欢迎标签 id=' + id); return; }
     var isWelcome = tab.isWelcome;
     var tabCount = Object.keys(tabs).length;
     var needConfirm = !force && !isWelcome && tab.ws && tabCount === 1;
@@ -582,23 +604,54 @@
         }
       }
     }
+    updateTabsScrollState();
     diag('[doClose] === 完成关闭 ===');
   }
 
   function closeAllTabs(noWelcome) {
+    // 全部关闭时跳过欢迎标签
+    var welcomeId = null;
     Object.keys(tabs).forEach(function (id) {
       var tab = tabs[id];
+      if (tab && tab.isWelcome) {
+        welcomeId = id;
+        return;
+      }
       if (tab) {
         if (tab.ws) try { tab.ws.close(); } catch (e) {}
         if (tab.term) try { tab.term.dispose(); } catch (e) {}
       }
     });
-    el('terminals').innerHTML = '';
-    el('tabs').innerHTML = '';
-    tabs = {};
-    wsMap = {};
-    activeId = null;
-    if (!noWelcome) newTab('欢迎', true);
+    // 只清除非欢迎标签的 DOM
+    var tabsContainer = el('tabs');
+    var terminalsContainer = el('terminals');
+    Array.from(tabsContainer.children).forEach(function (child) {
+      var id = child.id.replace('tab_', '');
+      if (id !== welcomeId) child.remove();
+    });
+    Array.from(terminalsContainer.children).forEach(function (child) {
+      var id = child.id.replace('term_', '');
+      if (id !== welcomeId) child.remove();
+    });
+    // 从 tabs / wsMap 中清除非欢迎标签
+    Object.keys(tabs).forEach(function (id) {
+      if (id !== welcomeId) {
+        delete tabs[id];
+        delete wsMap[id];
+      }
+    });
+    // 如果之前激活的 tab 被关了，激活欢迎标签（如果存在）；否则新建欢迎标签
+    if (activeId !== welcomeId) {
+      activeId = welcomeId;
+      if (welcomeId && tabs[welcomeId]) {
+        var div = document.getElementById('tab_' + welcomeId);
+        if (div) div.classList.add('active');
+      } else if (!noWelcome) {
+        newTab('欢迎', true);
+      }
+    }
+    if (!noWelcome && !welcomeId) newTab('欢迎', true);
+    updateTabsScrollState();
   }
 
   el('closeAllBtn').onclick = function () {
@@ -607,8 +660,12 @@
     showConfirm('关闭所有标签页?', function () { closeAllTabs(false); });
   };
 
-  el('tabsLeft').onclick = function () { el('tabs').scrollLeft -= 80; };
-  el('tabsRight').onclick = function () { el('tabs').scrollLeft += 80; };
+  el('tabsLeft').onclick = function () { var b = el('tabs'); b.scrollBy({ left: -120, behavior: 'smooth' }); setTimeout(updateTabsScrollState, 350); };
+  el('tabsRight').onclick = function () { var b = el('tabs'); b.scrollBy({ left: 120, behavior: 'smooth' }); setTimeout(updateTabsScrollState, 350); };
+  el('tabs').addEventListener('scroll', updateTabsScrollState);
+  window.addEventListener('resize', updateTabsScrollState);
+  // 初始化箭头状态
+  setTimeout(updateTabsScrollState, 0);
 
   el('diagBtn').onclick = function () { el('diag').classList.toggle('open'); };
   el('diagClose').onclick = function () { el('diag').classList.remove('open'); };

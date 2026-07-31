@@ -134,6 +134,7 @@ body { display: flex; }
   border: none; border-right: 1px solid #333; cursor: pointer; font-size: 12px;
 }
 .tabArrow:hover { color: #fff; background: #37373d; }
+.tabArrow:disabled { color: #555; cursor: default; }
 #closeAllBtn {
   flex: 0 0 auto; padding: 0 12px; background: #2d2d30; color: #f48771;
   border: none; cursor: pointer; font-size: 12px;
