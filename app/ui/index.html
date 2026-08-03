@@ -2175,12 +2175,15 @@ function diag(t) {
     document.body.appendChild(menu);
     var onDocClick = function (ev) { if (menu && !menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', onDocClick); } };
     setTimeout(function () { document.addEventListener('click', onDocClick); }, 0);
-    menu.style.left = e.clientX + 'px';
-    menu.style.top = e.clientY + 'px';
-    setTimeout(function () {
-      var close = function (ev) { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); } };
-      document.addEventListener('click', close);
-    }, 0);
+    var vw = window.innerWidth, vh = window.innerHeight, pad = 4;
+    var mx = e.clientX, my = e.clientY;
+    var mw = menu.offsetWidth || 160, mh = menu.offsetHeight || 120;
+    if (mx + mw + pad > vw) mx = vw - mw - pad;
+    if (my + mh + pad > vh) my = vh - mh - pad;
+    if (mx < pad) mx = pad;
+    if (my < pad) my = pad;
+    menu.style.left = mx + 'px';
+    menu.style.top  = my + 'px';
   }
 
   function sftpTreeRename(tabId, oldPath, oldName) {
