@@ -1004,12 +1004,24 @@
     var upBtn = panel.querySelector('[data-action="up"]');
     var refreshBtn = panel.querySelector('[data-action="refresh"]');
     var mkdirBtn = panel.querySelector('[data-action="mkdir"]');
-    if (backBtn) backBtn.onclick = function () { /* TODO */ };
+    if (backBtn) backBtn.onclick = function () {
+      var hist = tab._sftpHist = (tab._sftpHist || []);
+      if (hist.length > 1) {
+        hist.pop();
+        sftpTreeOpen(tabId, hist[hist.length - 1]);
+      } else {
+        sftpTreeOpen(tabId, sftpParentPath(tab.sftpPath || '/'));
+      }
+    };
     if (upBtn) upBtn.onclick = function () { sftpTreeOpen(tabId, sftpParentPath(tab.sftpPath || '/')); };
     if (refreshBtn) refreshBtn.onclick = function () { sftpTreeOpen(tabId, tab.sftpPath || '/'); };
     if (mkdirBtn) mkdirBtn.onclick = function () { sftpTreeMkdir(tabId); };
     var uploadBtn = panel.querySelector('[data-action="upload"]');
     if (uploadBtn) uploadBtn.onclick = function () { sftpTreeUpload(tabId); };
+    if (path) {
+      var hist = tab._sftpHist = (tab._sftpHist || []);
+      if (hist[hist.length - 1] !== path) hist.push(path);
+    }
     sftpTreeList(tabId, path);
   }
 
@@ -1073,18 +1085,8 @@
     });
     list.innerHTML = html;
     list.querySelectorAll('.sftp-row').forEach(function (row) {
-      row.onclick = function () {
-        var p = row.getAttribute('data-path');
-        if (row.classList.contains('sftp-dir')) {
-          sftpTreeOpen(tabId, p);
-        } else {
-          sftpTreeDownload(tabId, p, row.getAttribute('data-name'));
-        }
-      };
-      row.oncontextmenu = function (e) {
-        e.preventDefault();
-        sftpRowCtx(e, tabId, row);
-      };
+      bindRow(row);
+      row.oncontextmenu = function (e) { e.preventDefault(); sftpRowCtx(e, tabId, row); };
     });
   }
 
@@ -1133,7 +1135,43 @@
     input.onchange = function () {
       var file = input.files && input.files[0];
       if (!file) { input.remove(); return; }
+      var sftpPanel = el('sftp_' + tabId);
+      var progEl = sftpPanel && sftpPanel.querySelector('[data-role="progress"]');
+      var progBar = sftpPanel && sftpPanel.querySelector('[data-role="progress-bar"]');
+      var progTxt = sftpPanel && sftpPanel.querySelector('[data-role="progress-text"]');
+      var progBox = sftpPanel && sftpPanel.querySelector('[data-role="progress-box"]');
+      function setSftpProg(pct) { if (progBar) progBar.style.width = pct + '%'; }
+      function showSftpProg(show) { if (progBox) progBox.style.display = show ? 'flex' : 'none'; }
+      if (progTxt) progTxt.textContent = file.name + '  0%';
+      showSftpProg(true);
+      setSftpProg(0);
+      var finished = false;
+      function finishOk() {
+        if (finished) return; finished = true;
+        setSftpProg(100);
+        if (progTxt) progTxt.textContent = file.name + '  100%';
+        setTimeout(function () { showSftpProg(false); }, 1200);
+        tab.ws.onmessage = origOnMsg;
+        sftpTreeList(tabId, tab.sftpPath || '/');
+        showMsg('上传成功: ' + file.name);
+      }
+      function finishFail(msg) {
+        if (finished) return; finished = true;
+        setSftpProg(0);
+        if (progTxt) progTxt.textContent = file.name + '  失败';
+        setTimeout(function () { showSftpProg(false); }, 1500);
+        tab.ws.onmessage = origOnMsg;
+        showMsg('上传失败: ' + (msg || '未知'));
+      }
+      var origOnMsg = tab.ws.onmessage;
       var reader = new FileReader();
+      reader.onprogress = function (pe) {
+        if (pe.lengthComputable) {
+          var p = Math.round(pe.loaded / pe.total * 80);
+          setSftpProg(p);
+          if (progTxt) progTxt.textContent = file.name + '  ' + p + '%';
+        }
+      };
       reader.onload = function (ev) {
         var bytes = new Uint8Array(ev.target.result);
         var bin = '';
@@ -1142,28 +1180,20 @@
         var base = tab.sftpPath || '/';
         var fullPath = base + (base.endsWith('/') ? '' : '/') + file.name;
         var reqId = 'up_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        setSftpProg(85);
+        if (progTxt) progTxt.textContent = file.name + '  85%';
         tab.ws.send(JSON.stringify({ type: 'sftp-upload', id: reqId, path: fullPath, data: b64 }));
-        var origOnMsg = tab.ws.onmessage;
+        setSftpProg(92);
+        if (progTxt) progTxt.textContent = file.name + '  92%';
         tab.ws.onmessage = function (ev2) {
-          var m = JSON.parse(ev2.data);
+          var m; try { m = JSON.parse(ev2.data); } catch (e) { return; }
           if (m.id !== reqId) { if (origOnMsg) origOnMsg(ev2); return; }
-          if (m.type === 'sftp-upload') {
-            showMsg('上传成功: ' + file.name);
-            sftpTreeList(tabId, tab.sftpPath || '/');
-          } else if (m.type === 'sftp-error') {
-            showMsg('上传失败: ' + (m.data || '未知'));
-          }
-          tab.ws.onmessage = origOnMsg;
+          if (m.type === 'sftp-upload') finishOk();
+          else if (m.type === 'sftp-error') finishFail(m.data || '服务器错误');
         };
-        setTimeout(function () {
-          if (tab.ws && tab.ws.onmessage !== origOnMsg) {
-            tab.ws.onmessage = origOnMsg;
-            showMsg('上传超时');
-          }
-        }, 60000);
-        input.remove();
+        setTimeout(function () { if (!finished) finishFail('超时'); }, 60000);
       };
-      reader.onerror = function () { showMsg('读取文件失败'); input.remove(); };
+      reader.onerror = function () { finishFail('读取文件失败'); input.remove(); };
       reader.readAsArrayBuffer(file);
     };
     input.click();
@@ -1258,7 +1288,10 @@
       div.onclick = function () { menu.remove(); it.action(); };
       menu.appendChild(div);
     });
+    var olds = document.querySelectorAll('.sftp-ctx-menu'); for (var oi = 0; oi < olds.length; oi++) olds[oi].remove();
     document.body.appendChild(menu);
+    var onDocClick = function (ev) { if (menu && !menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', onDocClick); } };
+    setTimeout(function () { document.addEventListener('click', onDocClick); }, 0);
     menu.style.left = e.clientX + 'px';
     menu.style.top = e.clientY + 'px';
     setTimeout(function () {
@@ -1300,6 +1333,14 @@
 
   function bindRow(row) {
     row.onclick = function () {
+      var list = row.closest('.sftp-list');
+      if (list) {
+        var prev = list.querySelector('.sftp-row.active');
+        if (prev && prev !== row) prev.classList.remove('active');
+      }
+      row.classList.add('active');
+    };
+    row.ondblclick = function () {
       var tabId = row.closest('.sftp-tree').id.replace('sftp_', '');
       var p = row.getAttribute('data-path');
       if (row.classList.contains('sftp-dir')) sftpTreeOpen(tabId, p);

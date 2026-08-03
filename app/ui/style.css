@@ -404,4 +404,50 @@ body { overflow: hidden; }
 .sftp-ctx-menu {
   font-family: -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
+
+/* SFTP row selected (single-click) */
+.sftp-row.active { background: #0e639c !important; color: #fff; }
+.sftp-row.active .sftp-meta { color: #d4d4d4; }
+
+/* SFTP list scrollbar - mirror xterm viewport */
+.sftp-list::-webkit-scrollbar { width: 10px; height: 10px; }
+.sftp-list::-webkit-scrollbar-track { background: transparent; }
+.sftp-list::-webkit-scrollbar-thumb {
+  background: #4a4a4a;
+  border-radius: 5px;
+  border: 2px solid #1e1e1e;
+}
+.sftp-list::-webkit-scrollbar-thumb:hover { background: #6a6a6a; }
+.sftp-list::-webkit-scrollbar-corner { background: transparent; }
+
+/* SFTP upload progress */
+.sftp-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid #2d2d2d;
+  background: #1e1e1e;
+  font-size: 11px;
+  color: #d4d4d4;
+}
+.sftp-progress-text {
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sftp-progress-track {
+  height: 4px;
+  background: #2d2d2d;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.sftp-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: #4ec9b0;
+  transition: width 0.15s linear;
+}
+
 /* ===== SFTP END ===== */
