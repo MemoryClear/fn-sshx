@@ -451,3 +451,38 @@ body { overflow: hidden; }
 }
 
 /* ===== SFTP END ===== */
+/* ===== Status Bar (Notepad++ 风格底部) ===== */
+#statusBar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  height: 24px;
+  background: #007acc;
+  color: #fff;
+  font-size: 12px;
+  border-top: 1px solid #005a9e;
+  user-select: none;
+}
+#statusLeft { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.enc-select-wrap { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+.enc-label { font-size: 12px; }
+#encodingSel {
+  background: #005a9e;
+  color: #fff;
+  border: 1px solid #003e6b;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+#encodingSel:hover { background: #0066b8; }
+#encodingSel:focus { border-color: #fff; }
+/* 640px 移动端：状态栏继续显示但内容简化 */
+@media (max-width: 640px) {
+  #statusLeft { font-size: 11px; }
+  .enc-label { display: none; }
+  #encodingSel { font-size: 11px; }
+}

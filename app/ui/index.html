@@ -678,6 +678,42 @@ body { overflow: hidden; }
 }
 
 /* ===== SFTP END ===== */
+/* ===== Status Bar (Notepad++ 风格底部) ===== */
+#statusBar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  height: 24px;
+  background: #007acc;
+  color: #fff;
+  font-size: 12px;
+  border-top: 1px solid #005a9e;
+  user-select: none;
+}
+#statusLeft { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.enc-select-wrap { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+.enc-label { font-size: 12px; }
+#encodingSel {
+  background: #005a9e;
+  color: #fff;
+  border: 1px solid #003e6b;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+#encodingSel:hover { background: #0066b8; }
+#encodingSel:focus { border-color: #fff; }
+/* 640px 移动端：状态栏继续显示但内容简化 */
+@media (max-width: 640px) {
+  #statusLeft { font-size: 11px; }
+  .enc-label { display: none; }
+  #encodingSel { font-size: 11px; }
+}
+
   </style>
 </head>
 <body>
@@ -728,6 +764,27 @@ body { overflow: hidden; }
       <button id="closeAllBtn" title="关闭所有标签">× 全部</button>
     </div>
     <div id="terminals"></div>
+    <div id="statusBar">
+      <span id="statusLeft"></span>
+      <label class="enc-select-wrap">
+        <span class="enc-label">编码:</span>
+        <select id="encodingSel">
+          <option value="utf-8">UTF-8</option>
+          <option value="gbk">GBK</option>
+          <option value="gb18030">GB18030</option>
+          <option value="big5">Big5</option>
+          <option value="shift_jis">Shift_JIS</option>
+          <option value="euc-jp">EUC-JP</option>
+          <option value="euc-kr">EUC-KR</option>
+          <option value="koi8-r">KOI8-R</option>
+          <option value="iso-8859-1">ISO-8859-1</option>
+          <option value="iso-8859-2">ISO-8859-2</option>
+          <option value="windows-1252">Windows-1252</option>
+          <option value="cp866">CP866</option>
+          <option value="macintosh">Mac</option>
+        </select>
+      </label>
+    </div>
   </div>
   <div id="connModal">
     <div class="modal-box">
@@ -804,7 +861,31 @@ window.renderWelcome = function (term) {
 (function () {
   var PREFIX = '/app/sshx';
   function el(id) { return document.getElementById(id); }
-  function diag(t) {
+    // ---- 字符集 (Notepad++ 风格底部状态栏) ----
+  var currentEncoding = 'utf-8';
+  var _encMap = {
+    'utf-8':'utf-8','gbk':'gb18030','gb18030':'gb18030','big5':'big5',
+    'shift_jis':'shift_jis','euc-jp':'euc-jp','euc-kr':'euc-kr',
+    'koi8-r':'koi8-r','iso-8859-1':'iso-8859-1','iso-8859-2':'iso-8859-2',
+    'windows-1252':'windows-1252','cp866':'ibm866','macintosh':'macintosh'
+  };
+  function _decodeBytes(b64) {
+    var bytes = Uint8Array.from(atob(b64), function(c){return c.charCodeAt(0);});
+    try { return new TextDecoder(currentEncoding).decode(bytes); }
+    catch(e) {
+      diag('[enc] 不支持 '+currentEncoding+', 回退 utf-8');
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+  }
+  function setEncoding(enc) {
+    var real = _encMap[enc] || enc;
+    try { new TextDecoder(real); currentEncoding = real; diag('[enc] 切换到 '+enc+' ('+real+')'); }
+    catch(e) { diag('[enc] 浏览器不支持 '+real); }
+  }
+  var encSel = el('encodingSel');
+  if (encSel) encSel.onchange = function () { setEncoding(encSel.value); };
+
+function diag(t) {
     var d = el('diagContent');
     if (d) { d.textContent += '\n' + t; d.scrollTop = d.scrollHeight; }
   }
@@ -1217,7 +1298,7 @@ window.renderWelcome = function (term) {
         };
         ws.onmessage = function (e) {
           var m = JSON.parse(e.data);
-          if (m.type === 'data') { term.write(atob(m.data)); }
+          if (m.type === 'data') { term.write(_decodeBytes(m.data)); }
           else if (m.type === 'ready') {
             diag('[SSH] 已连接 tab=' + id + ' mode=' + (m.mode || 'ssh'));
             retryCount = 0; // 成功后重置
@@ -1715,7 +1796,7 @@ window.renderWelcome = function (term) {
     };
     ws.onmessage = function (e) {
       var m = JSON.parse(e.data);
-      if (m.type === 'data') { tab.term.write(atob(m.data)); }
+      if (m.type === 'data') { tab.term.write(_decodeBytes(m.data)); }
       else if (m.type === 'ready') {
         tab.term.writeln('\r\n\x1b[32m✓ 已重连\x1b[0m\r\n');
         tabs[currentId]._connected = true;

@@ -2,7 +2,31 @@
 (function () {
   var PREFIX = '/app/sshx';
   function el(id) { return document.getElementById(id); }
-  function diag(t) {
+    // ---- 字符集 (Notepad++ 风格底部状态栏) ----
+  var currentEncoding = 'utf-8';
+  var _encMap = {
+    'utf-8':'utf-8','gbk':'gb18030','gb18030':'gb18030','big5':'big5',
+    'shift_jis':'shift_jis','euc-jp':'euc-jp','euc-kr':'euc-kr',
+    'koi8-r':'koi8-r','iso-8859-1':'iso-8859-1','iso-8859-2':'iso-8859-2',
+    'windows-1252':'windows-1252','cp866':'ibm866','macintosh':'macintosh'
+  };
+  function _decodeBytes(b64) {
+    var bytes = Uint8Array.from(atob(b64), function(c){return c.charCodeAt(0);});
+    try { return new TextDecoder(currentEncoding).decode(bytes); }
+    catch(e) {
+      diag('[enc] 不支持 '+currentEncoding+', 回退 utf-8');
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+  }
+  function setEncoding(enc) {
+    var real = _encMap[enc] || enc;
+    try { new TextDecoder(real); currentEncoding = real; diag('[enc] 切换到 '+enc+' ('+real+')'); }
+    catch(e) { diag('[enc] 浏览器不支持 '+real); }
+  }
+  var encSel = el('encodingSel');
+  if (encSel) encSel.onchange = function () { setEncoding(encSel.value); };
+
+function diag(t) {
     var d = el('diagContent');
     if (d) { d.textContent += '\n' + t; d.scrollTop = d.scrollHeight; }
   }
@@ -415,7 +439,7 @@
         };
         ws.onmessage = function (e) {
           var m = JSON.parse(e.data);
-          if (m.type === 'data') { term.write(atob(m.data)); }
+          if (m.type === 'data') { term.write(_decodeBytes(m.data)); }
           else if (m.type === 'ready') {
             diag('[SSH] 已连接 tab=' + id + ' mode=' + (m.mode || 'ssh'));
             retryCount = 0; // 成功后重置
@@ -913,7 +937,7 @@
     };
     ws.onmessage = function (e) {
       var m = JSON.parse(e.data);
-      if (m.type === 'data') { tab.term.write(atob(m.data)); }
+      if (m.type === 'data') { tab.term.write(_decodeBytes(m.data)); }
       else if (m.type === 'ready') {
         tab.term.writeln('\r\n\x1b[32m✓ 已重连\x1b[0m\r\n');
         tabs[currentId]._connected = true;
