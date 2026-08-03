@@ -306,12 +306,27 @@
     div.className = 'tab' + (isWelcome ? ' welcome-tab' : '');
     // 欢迎标签不渲染关闭按钮
     var displayLabel = (isWelcome ? '🏠 ' : '') + label;
-    div.innerHTML = '<span class="tab-dot" id="tdot_' + id + '"></span><span class="tab-label">' + esc(displayLabel) + '</span>' + (isWelcome ? '' : '<button class="tab-close">×</button>');
+    div.innerHTML = (isWelcome ? '' : '<span class="tab-sftp" id="tsftp_' + id + '" title="文件树">&#128193;</span>') + '<span class="tab-dot" id="tdot_' + id + '"></span><span class="tab-label">' + esc(displayLabel) + '</span>' + (isWelcome ? '' : '<button class="tab-close">×</button>');
     el('tabs').appendChild(div);
     var termDiv = document.createElement('div');
     termDiv.id = 'term_' + id;
     termDiv.className = 'terminal';
-    el('terminals').appendChild(termDiv);
+    var wrapDiv = null;
+    if (!isWelcome) {
+      wrapDiv = document.createElement('div');
+      wrapDiv.id = 'wrap_' + id;
+      wrapDiv.className = 'tab-wrap';
+      wrapDiv.style.display = 'none';
+      wrapDiv.style.visibility = 'hidden';
+      wrapDiv.style.zIndex = '0';
+      var termArea = document.createElement('div');
+      termArea.className = 'term-area';
+      termArea.appendChild(termDiv);
+      wrapDiv.appendChild(termArea);
+      el('terminals').appendChild(wrapDiv);
+    } else {
+      el('terminals').appendChild(termDiv);
+    }
 
     var term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: 'Consolas, "Courier New", monospace', theme: { background: '#1e1e1e', foreground: '#d4d4d4', cursor: '#aaaaaa' }, allowProposedApi: true });
     term.open(termDiv);
@@ -341,10 +356,17 @@
     } catch (e) {
       diag('[newTab] FitAddon error: ' + e);
     }
-    tabs[id] = { term: term, termDiv: termDiv, ws: null, conn: conn, label: label, isWelcome: !!isWelcome, fitAddon: fitAddon };
+    tabs[id] = { term: term, termDiv: termDiv, wrapDiv: wrapDiv, ws: null, conn: conn, label: label, isWelcome: !!isWelcome, fitAddon: fitAddon, sftpTreeOpen: false, sftpPath: '/' };
 
     var closeBtn = div.querySelector('.tab-close');
     if (closeBtn) closeBtn.onclick = function () { closeTab(id); };
+    var sftpBtn = div.querySelector('.tab-sftp');
+    if (sftpBtn) {
+      sftpBtn.onclick = function (e) {
+        e.stopPropagation();
+        sftpTreeToggle(id);
+      };
+    }
     div.onclick = function () {
       diag('[click] tab=' + id + ' exists=' + !!tabs[id]);
       if (tabs[id]) activateTab(id);
@@ -465,9 +487,15 @@
       var t = tabs[tid];
       if (t && t.termDiv) {
         var shouldShow = tid === id;
-        t.termDiv.style.display = shouldShow ? '' : 'none';
-        t.termDiv.style.visibility = shouldShow ? 'visible' : 'hidden';
-        t.termDiv.style.zIndex = shouldShow ? '10' : '0';
+        if (t.wrapDiv) {
+          t.wrapDiv.style.display = shouldShow ? 'flex' : 'none';
+          t.wrapDiv.style.visibility = shouldShow ? 'visible' : 'hidden';
+          t.wrapDiv.style.zIndex = shouldShow ? '10' : '0';
+        } else if (t.termDiv) {
+          t.termDiv.style.display = shouldShow ? '' : 'none';
+          t.termDiv.style.visibility = shouldShow ? 'visible' : 'hidden';
+          t.termDiv.style.zIndex = shouldShow ? '10' : '0';
+        }
         diag('[activateTab] tab=' + tid + ' display=' + (shouldShow ? 'default' : 'none'));
       }
       var d = document.getElementById('tab_' + tid);
@@ -574,9 +602,11 @@
     delete wsMap[id];
 
     // 删除 DOM
+    var wrap = document.getElementById('wrap_' + id);
     var t = document.getElementById('term_' + id);
     var d = document.getElementById('tab_' + id);
-    if (t) t.remove();
+    if (wrap) wrap.remove();
+    else if (t) t.remove();
     if (d) d.remove();
 
     diag('[doClose] 已删除 id=' + id + ' nextId=' + nextId + ' tabs[nextId]=' + !!tabs[nextId]);
@@ -626,7 +656,7 @@
       if (id !== welcomeId) child.remove();
     });
     Array.from(terminalsContainer.children).forEach(function (child) {
-      var id = child.id.replace('term_', '');
+      var id = child.id.replace('wrap_', '').replace('term_', '');
       if (id !== welcomeId) child.remove();
     });
     // 从 tabs / wsMap 中清除非欢迎标签
@@ -888,6 +918,9 @@
         tab.term.writeln('\r\n\x1b[32m✓ 已重连\x1b[0m\r\n');
         tabs[currentId]._connected = true;
         diag('[reconnect] 重连成功 tab=' + currentId);
+        if (tabs[currentId].sftpTreeOpen) {
+          setTimeout(function () { sftpTreeOpen(currentId, tabs[currentId].sftpPath || '/'); }, 100);
+        }
       }
       else if (m.type === 'close' || m.type === 'closed') {
         var durationInfo = m.duration ? ' (连接时长: ' + m.duration + ')' : '';
@@ -934,4 +967,296 @@
   newTab('欢迎', true);
   diag('初始化完成');
 
+
+  // ===== SFTP 侧边文件树 =====
+  function sftpTreeToggle(tabId) {
+    var tab = tabs[tabId];
+    if (!tab || tab.isWelcome) return;
+    var wrap = tab.wrapDiv || document.getElementById('wrap_' + tabId);
+    if (!wrap) return;
+    var panel = wrap.querySelector('.sftp-tree');
+    if (panel && !panel.classList.contains('collapsed')) {
+      panel.classList.add('collapsed');
+      tab.sftpTreeOpen = false;
+    } else {
+      sftpTreeOpen(tabId, tab.sftpPath || '/');
+    }
+  }
+
+  function sftpTreeOpen(tabId, path) {
+    var tab = tabs[tabId];
+    if (!tab || tab.isWelcome) return;
+    if (!tab.ws || tab.ws.readyState !== 1) { showMsg('SSH未连接'); return; }
+    var wrap = tab.wrapDiv || document.getElementById('wrap_' + tabId);
+    if (!wrap) return;
+    var panel = wrap.querySelector('.sftp-tree');
+    if (!panel) {
+      var tpl = document.getElementById('sftpPanelTpl');
+      if (!tpl) return;
+      panel = tpl.firstElementChild ? tpl.firstElementChild.cloneNode(true) : null;
+      if (!panel) return;
+      panel.id = 'sftp_' + tabId;
+      wrap.appendChild(panel);
+    }
+    panel.classList.remove('collapsed');
+    tab.sftpTreeOpen = true;
+    var backBtn = panel.querySelector('[data-action="back"]');
+    var upBtn = panel.querySelector('[data-action="up"]');
+    var refreshBtn = panel.querySelector('[data-action="refresh"]');
+    var mkdirBtn = panel.querySelector('[data-action="mkdir"]');
+    if (backBtn) backBtn.onclick = function () { /* TODO */ };
+    if (upBtn) upBtn.onclick = function () { sftpTreeOpen(tabId, sftpParentPath(tab.sftpPath || '/')); };
+    if (refreshBtn) refreshBtn.onclick = function () { sftpTreeOpen(tabId, tab.sftpPath || '/'); };
+    if (mkdirBtn) mkdirBtn.onclick = function () { sftpTreeMkdir(tabId); };
+    sftpTreeList(tabId, path);
+  }
+
+  function sftpTreeList(tabId, path) {
+    var tab = tabs[tabId];
+    if (!tab || !tab.ws) return;
+    var reqId = 'sftp_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    tab._sftpReqId = reqId;
+    tab.sftpPath = path;
+    tab.ws.send(JSON.stringify({ type: 'sftp-list', id: reqId, path: path }));
+    var origOnMsg = tab.ws.onmessage;
+    tab.ws.onmessage = function (ev) {
+      var m = JSON.parse(ev.data);
+      if (m.id !== reqId) { if (origOnMsg) origOnMsg(ev); return; }
+      if (m.type === 'sftp-list') {
+        renderSftpTreeList(tabId, m.path, m.items || []);
+      } else if (m.type === 'sftp-error') {
+        showMsg('SFTP错误: ' + (m.data || '未知'));
+      }
+      tab.ws.onmessage = origOnMsg;
+    };
+    setTimeout(function () {
+      if (tab.ws && tab.ws.onmessage !== origOnMsg) {
+        tab.ws.onmessage = origOnMsg;
+        showMsg('SFTP列表超时');
+      }
+    }, 15000);
+  }
+
+  function renderSftpTreeList(tabId, path, items) {
+    var tab = tabs[tabId];
+    if (!tab) return;
+    var wrap = tab.wrapDiv || document.getElementById('wrap_' + tabId);
+    if (!wrap) return;
+    var panel = wrap.querySelector('.sftp-tree');
+    if (!panel) return;
+    var list = panel.querySelector('[data-role="list"]');
+    if (!list) return;
+    var pathEl = panel.querySelector('[data-role="path"]');
+    if (pathEl) pathEl.textContent = path || '/';
+    items.sort(function (a, b) {
+      var ad = sftpIsDir(a), bd = sftpIsDir(b);
+      if (ad !== bd) return ad ? -1 : 1;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+    var html = '';
+    var base = (path || '/');
+    if (!base.endsWith('/')) base += '/';
+    items.forEach(function (item) {
+      var name = String(item.name || '');
+      var isDir = sftpIsDir(item);
+      var fullPath = base + name;
+      var icon = isDir ? '&#128193;' : '&#128196;';
+      var size = isDir ? '' : sftpFormatSize(item.size || 0);
+      var date = item.mtime ? sftpFormatDate(item.mtime) : '';
+      html += '<div class="sftp-row ' + (isDir ? 'sftp-dir' : 'sftp-file') + '" data-path="' + sftpEscAttr(fullPath) + '" data-name="' + sftpEscAttr(name) + '">' +
+        '<span class="sftp-icon">' + icon + '</span>' +
+        '<span class="sftp-name">' + sftpEscAttr(name) + '</span>' +
+        '<span class="sftp-meta">' + (size ? size + ' ' : '') + date + '</span>' +
+        '</div>';
+    });
+    list.innerHTML = html;
+    list.querySelectorAll('.sftp-row').forEach(function (row) {
+      row.onclick = function () {
+        var p = row.getAttribute('data-path');
+        if (row.classList.contains('sftp-dir')) {
+          sftpTreeOpen(tabId, p);
+        } else {
+          sftpTreeDownload(tabId, p, row.getAttribute('data-name'));
+        }
+      };
+      row.oncontextmenu = function (e) {
+        e.preventDefault();
+        sftpRowCtx(e, tabId, row);
+      };
+    });
+  }
+
+  function sftpIsDir(item) {
+    if (item.isDir === true || item.isDir === false) return item.isDir;
+    if (item.type === 'd' || item.type === 'dir') return true;
+    if (item.attrs) {
+      if (typeof item.attrs.isDirectory === 'function' && item.attrs.isDirectory()) return true;
+      if (item.attrs.mode && (item.attrs.mode & 0o170000) === 0o040000) return true;
+      if (item.attrs.longname && item.attrs.longname[0] === 'd') return true;
+    }
+    return false;
+  }
+
+  function sftpEscAttr(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function sftpFormatSize(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(2) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(2) + ' MB';
+    return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+  }
+
+  function sftpFormatDate(ts) {
+    var d = new Date(ts);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function sftpParentPath(p) {
+    if (!p || p === '/') return '/';
+    var parts = p.split('/').filter(Boolean);
+    parts.pop();
+    return '/' + parts.join('/');
+  }
+
+  function sftpTreeDownload(tabId, path, name) {
+    var tab = tabs[tabId];
+    if (!tab || !tab.ws) return;
+    var reqId = 'dl_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    tab.ws.send(JSON.stringify({ type: 'sftp-download', id: reqId, path: path }));
+    var origOnMsg = tab.ws.onmessage;
+    tab.ws.onmessage = function (ev) {
+      var m = JSON.parse(ev.data);
+      if (m.id !== reqId) { if (origOnMsg) origOnMsg(ev); return; }
+      if (m.type === 'sftp-download' && m.data) {
+        var blob = sftpBase64ToBlob(m.data);
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = name || 'download'; document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      } else if (m.type === 'sftp-error') {
+        showMsg('下载失败: ' + (m.data || '未知'));
+      }
+      tab.ws.onmessage = origOnMsg;
+    };
+    setTimeout(function () { if (tab.ws && tab.ws.onmessage !== origOnMsg) tab.ws.onmessage = origOnMsg; }, 30000);
+  }
+
+  function sftpBase64ToBlob(b64) {
+    var bin = atob(b64);
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr]);
+  }
+
+  function sftpTreeMkdir(tabId) {
+    var tab = tabs[tabId];
+    if (!tab) return;
+    var wrap = tab.wrapDiv || document.getElementById('wrap_' + tabId);
+    if (!wrap) return;
+    var panel = wrap.querySelector('.sftp-tree');
+    if (!panel) return;
+    var list = panel.querySelector('[data-role="list"]');
+    if (!list || list.querySelector('.sftp-mkdir-row')) return;
+    var row = document.createElement('div');
+    row.className = 'sftp-row sftp-mkdir-row';
+    row.innerHTML = '<span class="sftp-icon">&#128193;</span><input type="text" class="sftp-mkdir-input" placeholder="新建目录名" />';
+    list.insertBefore(row, list.firstChild);
+    var input = row.querySelector('input');
+    input.focus();
+    input.onkeydown = function (e) {
+      if (e.key === 'Enter') {
+        var name = input.value.trim();
+        if (!name) { row.remove(); return; }
+        var base = tab.sftpPath || '/';
+        var path = base + (base.endsWith('/') ? '' : '/') + name;
+        sftpTreeOp(tabId, 'sftp-mkdir', path);
+        row.remove();
+      } else if (e.key === 'Escape') {
+        row.remove();
+      }
+    };
+  }
+
+  function sftpTreeOp(tabId, type, path) {
+    var tab = tabs[tabId];
+    if (!tab || !tab.ws) return;
+    tab.ws.send(JSON.stringify({ type: type, path: path }));
+    showMsg('操作已发送');
+    setTimeout(function () { sftpTreeOpen(tabId, tab.sftpPath || '/'); }, 600);
+  }
+
+  function sftpRowCtx(e, tabId, rowEl) {
+    var path = rowEl.getAttribute('data-path');
+    var name = rowEl.getAttribute('data-name');
+    var isDir = rowEl.classList.contains('sftp-dir');
+    var menu = document.createElement('div');
+    menu.className = 'sftp-ctx-menu';
+    menu.style.cssText = 'position:fixed;z-index:10000;background:#2d2d30;border:1px solid #555;border-radius:4px;padding:4px 0;box-shadow:0 2px 8px rgba(0,0,0,0.5);';
+    var items = [];
+    if (isDir) items.push({ label: '&#128193; 打开', action: function () { sftpTreeOpen(tabId, path); } });
+    else items.push({ label: '&#11015; 下载', action: function () { sftpTreeDownload(tabId, path, name); } });
+    items.push({ label: '&#9999; 重命名', action: function () { sftpTreeRename(tabId, path, name); } });
+    items.push({ label: '&#128465; 删除', action: function () { sftpTreeOp(tabId, isDir ? 'sftp-rmdir' : 'sftp-rm', path); } });
+    items.forEach(function (it) {
+      var div = document.createElement('div');
+      div.className = 'sftp-ctx-item';
+      div.innerHTML = it.label;
+      div.style.cssText = 'padding:4px 12px;cursor:pointer;white-space:nowrap;font-size:13px;color:#e0e0e0;';
+      div.onmouseenter = function () { div.style.background = '#0e639c'; div.style.color = '#fff'; };
+      div.onmouseleave = function () { div.style.background = ''; div.style.color = ''; };
+      div.onclick = function () { menu.remove(); it.action(); };
+      menu.appendChild(div);
+    });
+    document.body.appendChild(menu);
+    menu.style.left = e.clientX + 'px';
+    menu.style.top = e.clientY + 'px';
+    setTimeout(function () {
+      var close = function (ev) { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); } };
+      document.addEventListener('click', close);
+    }, 0);
+  }
+
+  function sftpTreeRename(tabId, oldPath, oldName) {
+    var tab = tabs[tabId];
+    if (!tab) return;
+    var wrap = tab.wrapDiv || document.getElementById('wrap_' + tabId);
+    if (!wrap) return;
+    var panel = wrap.querySelector('.sftp-tree');
+    if (!panel) return;
+    var list = panel.querySelector('[data-role="list"]');
+    if (!list) return;
+    var row = list.querySelector('[data-path="' + sftpEscAttr(oldPath) + '"]');
+    if (!row) return;
+    var origHtml = row.innerHTML;
+    var icon = row.querySelector('.sftp-icon') ? row.querySelector('.sftp-icon').innerHTML : '&#128196;';
+    row.innerHTML = '<span class="sftp-icon">' + icon + '</span><input type="text" class="sftp-rename-input" value="' + sftpEscAttr(oldName) + '" />';
+    var input = row.querySelector('input');
+    input.focus(); input.select();
+    var restore = function () { row.innerHTML = origHtml; bindRow(row); };
+    input.onkeydown = function (e) {
+      if (e.key === 'Enter') {
+        var newName = input.value.trim();
+        if (!newName || newName === oldName) { restore(); return; }
+        var newPath = sftpParentPath(oldPath) + '/' + newName;
+        sftpTreeOp(tabId, 'sftp-rename', { oldPath: oldPath, newPath: newPath });
+        restore();
+      } else if (e.key === 'Escape') {
+        restore();
+      }
+    };
+    input.onblur = function () { setTimeout(restore, 200); };
+  }
+
+  function bindRow(row) {
+    row.onclick = function () {
+      var tabId = row.closest('.sftp-tree').id.replace('sftp_', '');
+      var p = row.getAttribute('data-path');
+      if (row.classList.contains('sftp-dir')) sftpTreeOpen(tabId, p);
+      else sftpTreeDownload(tabId, p, row.getAttribute('data-name'));
+    };
+    row.oncontextmenu = function (e) { e.preventDefault(); sftpRowCtx(e, row.closest('.sftp-tree').id.replace('sftp_', ''), row); };
+  }
+  // ===== SFTP END =====
 })();

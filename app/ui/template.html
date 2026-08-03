@@ -126,5 +126,19 @@
 })();
   </script>
   <input type="file" id="importFileInput" accept=".sshx" style="display:none;" />
+
+<!-- SFTP 面板模板 -->
+<div id="sftpPanelTpl" style="display:none;">
+  <div class="sftp-tree collapsed">
+    <div class="sftp-tree-header">
+      <button data-action="back" title="后退">&#9664;</button>
+      <button data-action="up" title="上级">&#9650;</button>
+      <button data-action="refresh" title="刷新">&#8635;</button>
+      <span class="sftp-path" data-role="path">/</span>
+      <button data-action="mkdir" title="新建目录">+</button>
+    </div>
+    <div class="sftp-list" data-role="list"></div>
+  </div>
+</div>
 </body>
 </html>
