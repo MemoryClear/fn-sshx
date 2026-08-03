@@ -550,12 +550,22 @@ wss.on('connection', (ws, req) => {
     }
     return seconds + '秒';
   }
+  function getSftp(cb) {
+    if (sftpSession) return cb(null, sftpSession);
+    if (!sshClient) return cb(new Error('\u672A\u8FDE\u63A5SSH'));
+    sshClient.sftp(function (err, sftp) {
+      if (err) return cb(err);
+      sftpSession = sftp;
+      cb(null, sftp);
+    });
+  }
 
   let sshClient = null,
     shellStream = null,
     connecting = false,
     retryTimer = null,
-    connectStartTime = null;
+    connectStartTime = null,
+    sftpSession = null;
 
   // 全局并发限制：同时最多 4 个 ssh2 客户端
   let activeSshCount = 0;
@@ -565,6 +575,7 @@ wss.on('connection', (ws, req) => {
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
     if (connecting) { connecting = false; activeSshCount = Math.max(0, activeSshCount - 1); }
     if (shellStream) { try { shellStream.end(); } catch (e) {} shellStream = null; }
+    if (sftpSession) { try { sftpSession.end(); } catch (e) {} sftpSession = null; }
     if (sshClient) {
       try {
         sshClient.removeAllListeners();
@@ -721,7 +732,7 @@ wss.on('connection', (ws, req) => {
     // ---- SFTP ----
     } else if (msg.type === 'sftp-list') {
       if (!sshClient) { send({ type: 'sftp-error', data: '未连接SSH', id: msg.id }); return; }
-      sshClient.sftp(function (err, sftp) {
+      getSftp(function (err, sftp) {
         if (err) { send({ type: 'sftp-error', data: err.message, id: msg.id }); return; }
         sftp.readdir(msg.path || '.', function (err, list) {
           if (err) { send({ type: 'sftp-error', data: err.message, id: msg.id }); return; }
@@ -733,7 +744,7 @@ wss.on('connection', (ws, req) => {
       });
     } else if (msg.type === 'sftp-download') {
       if (!sshClient) { send({ type: 'sftp-error', data: '未连接SSH', id: msg.id }); return; }
-      sshClient.sftp(function (err, sftp) {
+      getSftp(function (err, sftp) {
         if (err) { send({ type: 'sftp-error', data: err.message, id: msg.id }); return; }
         var chunks = [];
         sftp.createReadStream(msg.path)
@@ -743,7 +754,7 @@ wss.on('connection', (ws, req) => {
       });
     } else if (msg.type === 'sftp-upload') {
       if (!sshClient) { send({ type: 'sftp-error', data: '未连接SSH', id: msg.id }); return; }
-      sshClient.sftp(function (err, sftp) {
+      getSftp(function (err, sftp) {
         if (err) { send({ type: 'sftp-error', data: err.message, id: msg.id }); return; }
         var buf = Buffer.from(msg.data || '', 'base64');
         var stream = sftp.createWriteStream(msg.path, { flags: 'w' });
@@ -753,25 +764,25 @@ wss.on('connection', (ws, req) => {
       });
     } else if (msg.type === 'sftp-mkdir') {
       if (!sshClient) { send({ type: 'sftp-error', data: '未连接SSH', id: msg.id }); return; }
-      sshClient.sftp(function (err, sftp) {
+      getSftp(function (err, sftp) {
         if (err) { send({ type: 'sftp-error', data: err.message, id: msg.id }); return; }
         sftp.mkdir(msg.path, function (e) { send({ type: e ? 'sftp-error' : 'sftp-upload', id: msg.id, data: e ? e.message : 'ok' }); });
       });
     } else if (msg.type === 'sftp-rm') {
       if (!sshClient) { send({ type: 'sftp-error', data: '未连接SSH', id: msg.id }); return; }
-      sshClient.sftp(function (err, sftp) {
+      getSftp(function (err, sftp) {
         if (err) { send({ type: 'sftp-error', data: err.message, id: msg.id }); return; }
         sftp.unlink(msg.path, function (e) { send({ type: e ? 'sftp-error' : 'sftp-upload', id: msg.id, data: e ? e.message : 'ok' }); });
       });
     } else if (msg.type === 'sftp-rmdir') {
       if (!sshClient) { send({ type: 'sftp-error', data: '未连接SSH', id: msg.id }); return; }
-      sshClient.sftp(function (err, sftp) {
+      getSftp(function (err, sftp) {
         if (err) { send({ type: 'sftp-error', data: err.message, id: msg.id }); return; }
         sftp.rmdir(msg.path, function (e) { send({ type: e ? 'sftp-error' : 'sftp-upload', id: msg.id, data: e ? e.message : 'ok' }); });
       });
     } else if (msg.type === 'sftp-rename') {
       if (!sshClient) { send({ type: 'sftp-error', data: '未连接SSH', id: msg.id }); return; }
-      sshClient.sftp(function (err, sftp) {
+      getSftp(function (err, sftp) {
         if (err) { send({ type: 'sftp-error', data: err.message, id: msg.id }); return; }
         sftp.rename(msg.from, msg.to, function (e) { send({ type: e ? 'sftp-error' : 'sftp-upload', id: msg.id, data: e ? e.message : 'ok' }); });
       });
