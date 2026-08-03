@@ -1764,6 +1764,8 @@ window.renderWelcome = function (term) {
     if (upBtn) upBtn.onclick = function () { sftpTreeOpen(tabId, sftpParentPath(tab.sftpPath || '/')); };
     if (refreshBtn) refreshBtn.onclick = function () { sftpTreeOpen(tabId, tab.sftpPath || '/'); };
     if (mkdirBtn) mkdirBtn.onclick = function () { sftpTreeMkdir(tabId); };
+    var uploadBtn = panel.querySelector('[data-action="upload"]');
+    if (uploadBtn) uploadBtn.onclick = function () { sftpTreeUpload(tabId); };
     sftpTreeList(tabId, path);
   }
 
@@ -1876,7 +1878,54 @@ window.renderWelcome = function (term) {
     return '/' + parts.join('/');
   }
 
-  function sftpTreeDownload(tabId, path, name) {
+
+  function sftpTreeUpload(tabId) {
+    var tab = tabs[tabId];
+    if (!tab || !tab.ws || tab.ws.readyState !== 1) { showMsg('SSH未连接'); return; }
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    input.onchange = function () {
+      var file = input.files && input.files[0];
+      if (!file) { input.remove(); return; }
+      var reader = new FileReader();
+      reader.onload = function (ev) {
+        var bytes = new Uint8Array(ev.target.result);
+        var bin = '';
+        for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        var b64 = btoa(bin);
+        var base = tab.sftpPath || '/';
+        var fullPath = base + (base.endsWith('/') ? '' : '/') + file.name;
+        var reqId = 'up_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        tab.ws.send(JSON.stringify({ type: 'sftp-upload', id: reqId, path: fullPath, data: b64 }));
+        var origOnMsg = tab.ws.onmessage;
+        tab.ws.onmessage = function (ev2) {
+          var m = JSON.parse(ev2.data);
+          if (m.id !== reqId) { if (origOnMsg) origOnMsg(ev2); return; }
+          if (m.type === 'sftp-upload') {
+            showMsg('上传成功: ' + file.name);
+            sftpTreeList(tabId, tab.sftpPath || '/');
+          } else if (m.type === 'sftp-error') {
+            showMsg('上传失败: ' + (m.data || '未知'));
+          }
+          tab.ws.onmessage = origOnMsg;
+        };
+        setTimeout(function () {
+          if (tab.ws && tab.ws.onmessage !== origOnMsg) {
+            tab.ws.onmessage = origOnMsg;
+            showMsg('上传超时');
+          }
+        }, 60000);
+        input.remove();
+      };
+      reader.onerror = function () { showMsg('读取文件失败'); input.remove(); };
+      reader.readAsArrayBuffer(file);
+    };
+    input.click();
+  }
+
+    function sftpTreeDownload(tabId, path, name) {
     var tab = tabs[tabId];
     if (!tab || !tab.ws) return;
     var reqId = 'dl_' + Date.now() + '_' + Math.random().toString(36).slice(2);
@@ -2040,6 +2089,7 @@ window.renderWelcome = function (term) {
       <button data-action="refresh" title="刷新">&#8635;</button>
       <span class="sftp-path" data-role="path">/</span>
       <button data-action="mkdir" title="新建目录">+</button>
+      <button data-action="upload" title="上传文件">&#8593;</button>
     </div>
     <div class="sftp-list" data-role="list"></div>
   </div>
