@@ -1,5 +1,5 @@
 appname="sshx"
-version="1.0.2"
+version="1.0.5"
 display_name="SSH 终端"
 desc="fnOS 原生 SSH 远程终端（类 MobaXterm），支持远程主机连接与本地终端，全程以非 root 应用用户运行。"
 platform="all"

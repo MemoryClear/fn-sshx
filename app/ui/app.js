@@ -330,7 +330,7 @@ function diag(t) {
     div.className = 'tab' + (isWelcome ? ' welcome-tab' : '');
     // 欢迎标签不渲染关闭按钮
     var displayLabel = (isWelcome ? '🏠 ' : '') + label;
-    div.innerHTML = (isWelcome ? '' : '<span class="tab-sftp" id="tsftp_' + id + '" title="文件树">&#128193;</span>') + '<span class="tab-dot" id="tdot_' + id + '"></span><span class="tab-label">' + esc(displayLabel) + '</span>' + (isWelcome ? '' : '<button class="tab-close">×</button>');
+    div.innerHTML = (isWelcome ? '' : '') + '<span class="tab-dot" id="tdot_' + id + '"></span><span class="tab-label">' + esc(displayLabel) + '</span>' + (isWelcome ? '' : '<button class="tab-close">×</button>');
     el('tabs').appendChild(div);
     var termDiv = document.createElement('div');
     termDiv.id = 'term_' + id;
@@ -472,6 +472,7 @@ function diag(t) {
           setDot(id, '#e74c3c');
         };
         ws.onclose = function () {
+          if (!tabs[id]) return; // tab 已关闭清理，忽略
           diag('[SSH] WebSocket 关闭 tab=' + id);
           setDot(id, '#888');
           if (!tabs[id]._connected) return; // 未成功连接过，不显示提示
@@ -481,7 +482,13 @@ function diag(t) {
 
       // 注册终端输入/resize处理器（使用tabs[id].ws引用当前WebSocket）
       var onDataDisposable = term.onData(function (data) {
-        if (tabs[id].ws && tabs[id].ws.readyState === 1) tabs[id].ws.send(JSON.stringify({ type: 'data', data: btoa(data) }));
+        if (tabs[id].ws && tabs[id].ws.readyState === 1) {
+          var enc = new TextEncoder();
+          var bytes = enc.encode(data);
+          var bin = '';
+          for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+          tabs[id].ws.send(JSON.stringify({ type: 'data', data: btoa(bin) }));
+        }
       });
       var onResizeDisposable = term.onResize(function (size) {
         if (tabs[id].ws && tabs[id].ws.readyState === 1) tabs[id].ws.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
@@ -959,6 +966,7 @@ function diag(t) {
     };
     ws.onerror = function () { setDot(currentId, '#e74c3c'); };
     ws.onclose = function () {
+      if (!tabs[currentId]) return; // tab 已关闭清理，忽略
       diag('[reconnect] WebSocket 关闭 tab=' + currentId);
       setDot(currentId, '#888');
       showDisconnectPrompt(currentId, tab.term, null);

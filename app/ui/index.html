@@ -678,7 +678,7 @@ body { overflow: hidden; }
 }
 
 /* ===== SFTP END ===== */
-/* ===== Status Bar (Notepad++ 风格底部) ===== */
+/* ===== Status Bar (深色风格统一) ===== */
 #statusBar {
   flex: 0 0 auto;
   display: flex;
@@ -686,27 +686,27 @@ body { overflow: hidden; }
   justify-content: space-between;
   padding: 0 8px;
   height: 24px;
-  background: #007acc;
-  color: #fff;
+  background: #2d2d30;
+  color: #e0e0e0;
   font-size: 12px;
-  border-top: 1px solid #005a9e;
+  border-top: 1px solid #333;
   user-select: none;
 }
 #statusLeft { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .enc-select-wrap { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
-.enc-label { font-size: 12px; }
+.enc-label { font-size: 12px; color: #ccc; }
 #encodingSel {
-  background: #005a9e;
-  color: #fff;
-  border: 1px solid #003e6b;
-  border-radius: 3px;
+  background: #1e1e1e;
+  color: #e0e0e0;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
   padding: 1px 4px;
   font-size: 12px;
   cursor: pointer;
   outline: none;
 }
-#encodingSel:hover { background: #0066b8; }
-#encodingSel:focus { border-color: #fff; }
+#encodingSel:hover { background: #2a2a2a; border-color: #555; }
+#encodingSel:focus { border-color: #0e639c; }
 /* 640px 移动端：状态栏继续显示但内容简化 */
 @media (max-width: 640px) {
   #statusLeft { font-size: 11px; }
@@ -1189,7 +1189,7 @@ function diag(t) {
     div.className = 'tab' + (isWelcome ? ' welcome-tab' : '');
     // 欢迎标签不渲染关闭按钮
     var displayLabel = (isWelcome ? '🏠 ' : '') + label;
-    div.innerHTML = (isWelcome ? '' : '<span class="tab-sftp" id="tsftp_' + id + '" title="文件树">&#128193;</span>') + '<span class="tab-dot" id="tdot_' + id + '"></span><span class="tab-label">' + esc(displayLabel) + '</span>' + (isWelcome ? '' : '<button class="tab-close">×</button>');
+    div.innerHTML = (isWelcome ? '' : '') + '<span class="tab-dot" id="tdot_' + id + '"></span><span class="tab-label">' + esc(displayLabel) + '</span>' + (isWelcome ? '' : '<button class="tab-close">×</button>');
     el('tabs').appendChild(div);
     var termDiv = document.createElement('div');
     termDiv.id = 'term_' + id;
@@ -1331,6 +1331,7 @@ function diag(t) {
           setDot(id, '#e74c3c');
         };
         ws.onclose = function () {
+          if (!tabs[id]) return; // tab 已关闭清理，忽略
           diag('[SSH] WebSocket 关闭 tab=' + id);
           setDot(id, '#888');
           if (!tabs[id]._connected) return; // 未成功连接过，不显示提示
@@ -1340,7 +1341,13 @@ function diag(t) {
 
       // 注册终端输入/resize处理器（使用tabs[id].ws引用当前WebSocket）
       var onDataDisposable = term.onData(function (data) {
-        if (tabs[id].ws && tabs[id].ws.readyState === 1) tabs[id].ws.send(JSON.stringify({ type: 'data', data: btoa(data) }));
+        if (tabs[id].ws && tabs[id].ws.readyState === 1) {
+          var enc = new TextEncoder();
+          var bytes = enc.encode(data);
+          var bin = '';
+          for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+          tabs[id].ws.send(JSON.stringify({ type: 'data', data: btoa(bin) }));
+        }
       });
       var onResizeDisposable = term.onResize(function (size) {
         if (tabs[id].ws && tabs[id].ws.readyState === 1) tabs[id].ws.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
@@ -1818,6 +1825,7 @@ function diag(t) {
     };
     ws.onerror = function () { setDot(currentId, '#e74c3c'); };
     ws.onclose = function () {
+      if (!tabs[currentId]) return; // tab 已关闭清理，忽略
       diag('[reconnect] WebSocket 关闭 tab=' + currentId);
       setDot(currentId, '#888');
       showDisconnectPrompt(currentId, tab.term, null);
