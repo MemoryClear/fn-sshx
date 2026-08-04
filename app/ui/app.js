@@ -2,6 +2,17 @@
 (function () {
   var PREFIX = '/app/sshx';
   function el(id) { return document.getElementById(id); }
+  function diag(t) {
+    var d = el('diagContent');
+    if (d) { d.textContent += '\n' + t; d.scrollTop = d.scrollHeight; }
+  }
+  function setDot(tabId, color) {
+    var dot = el('tdot_' + tabId);
+    if (dot) dot.style.background = color || '#888';
+  }
+  function esc(str) {
+    return String(str).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'");
+  }
     // ---- 字符集 (Notepad++ 风格底部状态栏) ----
   var currentEncoding = 'utf-8';
   var _encMap = {
@@ -26,17 +37,6 @@
   var encSel = el('encodingSel');
   if (encSel) encSel.onchange = function () { setEncoding(encSel.value); };
 
-function diag(t) {
-    var d = el('diagContent');
-    if (d) { d.textContent += '\n' + t; d.scrollTop = d.scrollHeight; }
-  }
-  function setDot(tabId, color) {
-    var dot = el('tdot_' + tabId);
-    if (dot) dot.style.background = color || '#888';
-  }
-  function esc(str) {
-    return String(str).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'");
-  }
   function showMsg(msg, duration) {
     var box = el('msgBox');
     if (!box) {
@@ -300,10 +300,6 @@ function diag(t) {
 
   el('connCancel').onclick = function () { el('connModal').style.display = 'none'; };
 
-  function openSaved(name, host, port, user, pass) {
-    go(host, port, user, pass, name);
-  }
-
   function openSavedByName(name, id, host, port, user) {
     // Use connectSaved via WebSocket (server holds the password)
     newTab(name || (user + '@' + host + ':' + port), false, { id: id, saved: true, host: host, port: parseInt(port) || 22, user: user });
@@ -438,7 +434,10 @@ function diag(t) {
           }
         };
         ws.onmessage = function (e) {
-          var m = JSON.parse(e.data);
+          if (!tabs[id]) return; // tab 已关闭清理，忽略
+          if (typeof e.data !== 'string') return; // 跳过二进制帧（sftp-*），由劫持的 handler 处理
+          var m;
+          try { m = JSON.parse(e.data); } catch (err) { diag('[SSH] 非 JSON 消息: ' + e.data.slice(0, 80)); return; }
           if (m.type === 'data') { term.write(_decodeBytes(m.data)); }
           else if (m.type === 'ready') {
             diag('[SSH] 已连接 tab=' + id + ' mode=' + (m.mode || 'ssh'));
@@ -481,7 +480,7 @@ function diag(t) {
       }
 
       // 注册终端输入/resize处理器（使用tabs[id].ws引用当前WebSocket）
-      var onDataDisposable = term.onData(function (data) {
+      term.onData(function (data) {
         if (tabs[id].ws && tabs[id].ws.readyState === 1) {
           var enc = new TextEncoder();
           var bytes = enc.encode(data);
@@ -490,11 +489,9 @@ function diag(t) {
           tabs[id].ws.send(JSON.stringify({ type: 'data', data: btoa(bin) }));
         }
       });
-      var onResizeDisposable = term.onResize(function (size) {
+      term.onResize(function (size) {
         if (tabs[id].ws && tabs[id].ws.readyState === 1) tabs[id].ws.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
       });
-      tabs[id]._onDataDisposable = onDataDisposable;
-      tabs[id]._onResizeDisposable = onResizeDisposable;
 
       attemptConnect();
     }
@@ -502,9 +499,9 @@ function diag(t) {
     activateTab(id);
     // 多次fit确保终端正确渲染
     var fa = fitAddon;
-    setTimeout(function () { try { fa && fa.fit(); diag('[newTab] fit1 done'); } catch (e) { diag('[newTab] fit1 error: ' + e); } }, 50);
-    setTimeout(function () { try { fa && fa.fit(); diag('[newTab] fit2 done'); } catch (e) {} }, 200);
-    setTimeout(function () { try { fa && fa.fit(); diag('[newTab] fit3 done'); } catch (e) {} }, 500);
+    [50, 200, 500].forEach(function (delay) {
+      setTimeout(function () { try { fa && fa.fit(); } catch (e) { diag('[newTab] fit' + delay + ' error: ' + e); } }, delay);
+    });
   }
 
   function activateTab(id) {
@@ -943,7 +940,10 @@ function diag(t) {
       }
     };
     ws.onmessage = function (e) {
-      var m = JSON.parse(e.data);
+      if (!tabs[currentId]) return;
+      if (typeof e.data !== 'string') return;
+      var m;
+      try { m = JSON.parse(e.data); } catch (err) { return; }
       if (m.type === 'data') { tab.term.write(_decodeBytes(m.data)); }
       else if (m.type === 'ready') {
         tab.term.writeln('\r\n\x1b[32m✓ 已重连\x1b[0m\r\n');
@@ -1168,7 +1168,6 @@ function diag(t) {
       var file = input.files && input.files[0];
       if (!file) { input.remove(); return; }
       var sftpPanel = el('sftp_' + tabId);
-      var progEl = sftpPanel && sftpPanel.querySelector('[data-role="progress"]');
       var progBar = sftpPanel && sftpPanel.querySelector('[data-role="progress-bar"]');
       var progTxt = sftpPanel && sftpPanel.querySelector('[data-role="progress-text"]');
       var progBox = sftpPanel && sftpPanel.querySelector('[data-role="progress-box"]');
