@@ -173,7 +173,7 @@
   }
 
   function checkAuthStatus() {
-    api('GET', '/api/settings').then(function (data) {
+    return api('GET', '/api/settings').then(function (data) {
       if (data.locked) {
         // 服务端已设访问密码
         if (getToken()) {
@@ -993,11 +993,16 @@
     }
   });
 
-  // 初始加载:始终先查询服务端锁状态,不依赖本地 token 判断登录态
-  checkAuthStatus();
-
-  newTab('欢迎', true);
-  diag('初始化完成');
+  // 初始加载:T0 同步用本地 token 推断显示初始 UI(避免侧栏空白一闪);
+  //         T+网络 checkAuthStatus 回来后用真值覆盖,最后才创建欢迎 tab
+  if (getToken()) { locked = true; } else { locked = false; }
+  renderConnList();
+  checkAuthStatus().finally(function () {
+    if (!Object.values(tabs).some(function (t) { return t.isWelcome; })) {
+      newTab('欢迎', true);
+    }
+    diag('初始化完成');
+  });
 
 
   // ===== SFTP 侧边文件树 =====

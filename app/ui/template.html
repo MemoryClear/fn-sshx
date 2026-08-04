@@ -14,7 +14,7 @@
   <div id="sidebar">
     <div id="sidebarInner">
     <div id="brand">SSH 连接管理器</div>
-    <div id="lock">
+    <div id="lock" style="display:none;">
       <div class="auth-title">🔓 输入访问密码</div>
       <label>访问密码</label>
       <input id="lockInput" type="password" placeholder="输入访问密码" />
@@ -27,9 +27,9 @@
       <input id="setInput2" type="password" placeholder="再次输入密码" />
       <button id="setBtn">设定并进入</button>
     </div>
-    <div id="connSearchArea"><input id="connSearch" type="text" placeholder="搜索连接…" /></div>
+    <div id="connSearchArea" style="display:none;"><input id="connSearch" type="text" placeholder="搜索连接…" /></div>
     <div id="connList"></div>
-    <div id="sidebarFoot">
+    <div id="sidebarFoot" style="display:none;">
       <button id="addConnBtn">+ 新增连接</button>
       <div id="importExportBtns">
         <button id="exportBtn" title="导出连接配置">📤 导出</button>
