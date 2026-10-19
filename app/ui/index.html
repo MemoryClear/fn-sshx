@@ -869,6 +869,29 @@ window.renderWelcome = function (term) {
     var dot = el('tdot_' + tabId);
     if (dot) dot.style.background = color || '#888';
   }
+  // 把 xterm 的真实行列数推给服务端 pty。
+  // pty 默认 80x24，若不同步，bash/readline 会按 80 列算换行和光标，
+  // 长命令行就会在错误的位置折行、覆盖提示符（表现为"显示错乱"）。
+  function sendTermSize(tabId) {
+    var t = tabs[tabId];
+    if (!t || !t.term || !t.ws || t.ws.readyState !== 1) return false;
+    try {
+      t.ws.send(JSON.stringify({ type: 'resize', cols: t.term.cols, rows: t.term.rows }));
+      diag('[resize] 同步尺寸 tab=' + tabId + ' ' + t.term.cols + 'x' + t.term.rows);
+      return true;
+    } catch (e) {
+      diag('[resize] 同步尺寸失败: ' + e);
+      return false;
+    }
+  }
+  // fit 之后再无条件推一次：fit 若没改变尺寸就不会触发 xterm 的 onResize，
+  // 而 pty 那边还停在旧尺寸上，所以这里必须显式发。
+  function fitAndSyncSize(tabId) {
+    var t = tabs[tabId];
+    if (!t) return;
+    try { if (t.fitAddon) t.fitAddon.fit(); } catch (e) {}
+    sendTermSize(tabId);
+  }
   function esc(str) {
     return String(str).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/'/g, "\\'");
   }
@@ -880,17 +903,42 @@ window.renderWelcome = function (term) {
     'koi8-r':'koi8-r','iso-8859-1':'iso-8859-1','iso-8859-2':'iso-8859-2',
     'windows-1252':'windows-1252','cp866':'ibm866','macintosh':'macintosh'
   };
-  function _decodeBytes(b64) {
-    var bytes = Uint8Array.from(atob(b64), function(c){return c.charCodeAt(0);});
-    try { return new TextDecoder(currentEncoding).decode(bytes); }
-    catch(e) {
-      diag('[enc] 不支持 '+currentEncoding+', 回退 utf-8');
-      return new TextDecoder('utf-8').decode(bytes);
+  // 每个终端持有自己的持久 decoder：TextDecoder 开 {stream:true} 后，
+  // 被 WebSocket 分片切断的多字节字符（中文/GBK）会暂存到下一片补齐，
+  // 否则每片单独解码就会在断点处渲染成 �。
+  var _decoders = {};
+  function _newDecoder(enc) {
+    try { return new TextDecoder(enc); }
+    catch (e) {
+      diag('[enc] 不支持 ' + enc + ', 回退 utf-8');
+      return new TextDecoder('utf-8');
     }
   }
+  function _decodeBytes(b64, tabId) {
+    var key = tabId || '__default__';
+    var d = _decoders[key];
+    if (!d) { d = _newDecoder(currentEncoding); _decoders[key] = d; }
+    var bytes = Uint8Array.from(atob(b64), function(c){return c.charCodeAt(0);});
+    try {
+      return d.decode(bytes, { stream: true });
+    } catch (e) {
+      // 解码器状态坏了（极少见）：重建一个，避免整个会话卡住
+      diag('[enc] 解码异常, 重建 decoder: ' + e);
+      _decoders[key] = _newDecoder(currentEncoding);
+      try { return _decoders[key].decode(bytes, { stream: true }); } catch (e2) { return ''; }
+    }
+  }
+  // 新会话/重连/换编码时丢弃残留的半截字节，避免上一段流的尾巴污染下一段
+  function _resetDecoder(tabId) { delete _decoders[tabId || '__default__']; }
+  function _resetAllDecoders() { _decoders = {}; }
   function setEncoding(enc) {
     var real = _encMap[enc] || enc;
-    try { new TextDecoder(real); currentEncoding = real; diag('[enc] 切换到 '+enc+' ('+real+')'); }
+    try {
+      new TextDecoder(real);
+      currentEncoding = real;
+      _resetAllDecoders();
+      diag('[enc] 切换到 '+enc+' ('+real+')');
+    }
     catch(e) { diag('[enc] 浏览器不支持 '+real); }
   }
   var encSel = el('encodingSel');
@@ -1279,16 +1327,17 @@ window.renderWelcome = function (term) {
 
         ws.onopen = function () {
           diag('[SSH] WebSocket 打开 tab=' + id);
+          _resetDecoder(id); // 新会话，丢弃上一段流残留的半截字节
           setDot(id, '#4caf50');
           if (retryCount === 1) {
             tabs[id]._disconnectShown = false;
             tabs[id]._connected = false;
           }
           if (conn.saved) {
-            ws.send(JSON.stringify({ type: 'connectSaved', id: conn.id }));
+            ws.send(JSON.stringify({ type: 'connectSaved', id: conn.id, cols: term.cols, rows: term.rows }));
             diag('[SSH] 发送 connectSaved id=' + conn.id);
           } else {
-            ws.send(JSON.stringify({ type: 'connect', host: conn.host, port: conn.port, username: conn.user, password: conn.pass || '' }));
+            ws.send(JSON.stringify({ type: 'connect', host: conn.host, port: conn.port, username: conn.user, password: conn.pass || '', cols: term.cols, rows: term.rows }));
             diag('[SSH] 发送 connect');
           }
         };
@@ -1297,12 +1346,15 @@ window.renderWelcome = function (term) {
           if (typeof e.data !== 'string') return; // 跳过二进制帧（sftp-*），由劫持的 handler 处理
           var m;
           try { m = JSON.parse(e.data); } catch (err) { diag('[SSH] 非 JSON 消息: ' + e.data.slice(0, 80)); return; }
-          if (m.type === 'data') { term.write(_decodeBytes(m.data)); }
+          if (m.type === 'data') { term.write(_decodeBytes(m.data, id)); }
           else if (m.type === 'ready') {
             diag('[SSH] 已连接 tab=' + id + ' mode=' + (m.mode || 'ssh'));
             retryCount = 0; // 成功后重置
             tabs[id]._disconnectShown = false; // 重置断开提示标志
             tabs[id]._connected = true; // 标记已成功连接
+            // shell 建好后强制同步一次尺寸，避免 pty 停在 80x24
+            setTimeout(function () { fitAndSyncSize(id); }, 0);
+            setTimeout(function () { fitAndSyncSize(id); }, 200);
           }
           else if (m.type === 'close' || m.type === 'closed') {
             var durationInfo = m.duration ? ' (连接时长: ' + m.duration + ')' : '';
@@ -1485,6 +1537,7 @@ window.renderWelcome = function (term) {
     // 清理资源
     if (tab.ws) { try { tab.ws.close(); } catch (e) {} }
     if (tab.term) { try { tab.term.dispose(); } catch (e) {} }
+    _resetDecoder(id);
     delete tabs[id];
     delete wsMap[id];
 
@@ -1790,12 +1843,13 @@ window.renderWelcome = function (term) {
 
     ws.onopen = function () {
       setDot(currentId, '#4caf50');
+      _resetDecoder(currentId); // 重连后从头解码新会话输出
       tabs[currentId]._disconnectShown = false; // 重置断开标记
       tabs[currentId]._connected = false; // 重连开始时重置，等待 ready 确认
       if (conn.saved) {
-        ws.send(JSON.stringify({ type: 'connectSaved', id: conn.id }));
+        ws.send(JSON.stringify({ type: 'connectSaved', id: conn.id, cols: tab.term.cols, rows: tab.term.rows }));
       } else {
-        ws.send(JSON.stringify({ type: 'connect', host: conn.host, port: conn.port, username: conn.user, password: conn.pass || '' }));
+        ws.send(JSON.stringify({ type: 'connect', host: conn.host, port: conn.port, username: conn.user, password: conn.pass || '', cols: tab.term.cols, rows: tab.term.rows }));
       }
     };
     ws.onmessage = function (e) {
@@ -1803,11 +1857,13 @@ window.renderWelcome = function (term) {
       if (typeof e.data !== 'string') return;
       var m;
       try { m = JSON.parse(e.data); } catch (err) { return; }
-      if (m.type === 'data') { tab.term.write(_decodeBytes(m.data)); }
+      if (m.type === 'data') { tab.term.write(_decodeBytes(m.data, currentId)); }
       else if (m.type === 'ready') {
         tab.term.writeln('\r\n\x1b[32m✓ 已重连\x1b[0m\r\n');
         tabs[currentId]._connected = true;
         diag('[reconnect] 重连成功 tab=' + currentId);
+        // 重连后同样要重新对齐 pty 尺寸，否则又退回 80 列
+        setTimeout(function () { fitAndSyncSize(currentId); }, 0);
         if (tabs[currentId].sftpTreeOpen) {
           setTimeout(function () { sftpTreeOpen(currentId, tabs[currentId].sftpPath || '/'); }, 100);
         }

@@ -1,0 +1,339 @@
+#!/bin/bash
+# =============================================================================
+#  sshx · 连接管理器「访问密码」清除工具
+# =============================================================================
+#  忘记应用访问密码时使用：直接移除 settings.json 中的 appPasswordHash，解除锁定。
+#  默认保留 encryptionKey，因此已保存的 SSH 连接密码仍然可以正常解密使用。
+#
+#  用法（在 fnOS 终端 / SSH 里以 root 执行）：
+#    sudo bash /vol1/@appcenter/sshx/cmd/reset_pass              # 仅清除面板密码
+#    sudo bash /vol1/@appcenter/sshx/cmd/reset_pass --show        # 只看当前状态，不改文件
+#    sudo bash /vol1/@appcenter/sshx/cmd/reset_pass --dry-run     # 预览将要做的改动
+#    sudo bash /vol1/@appcenter/sshx/cmd/reset_pass --purge-key   # 连加密密钥一起清除
+#
+#  --purge-key 会删除 encryptionKey，并清空 connections.json 里已保存的 SSH 密码
+#  （这些密码是用该密钥加密的，密钥没了就再也解不开），需要二次确认。
+#
+#  说明：服务端每次请求都会重新读取 settings.json，执行完不需要重启应用，
+#        浏览器刷新页面即可。改动前会自动备份为 *.bak.<时间戳>（保留最近 5 份）。
+# =============================================================================
+
+set -u
+
+APP_NAME="sshx"
+MODE="reset"
+DRY=0
+ASSUME_YES=0
+
+usage() {
+    # 打印文件开头的注释块（跳过 shebang，遇到第一行非注释即停）
+    awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --purge-key|--purge) MODE="purge" ;;
+        --show|--status)     MODE="show" ;;
+        --dry-run|-n)        DRY=1 ;;
+        --yes|-y)            ASSUME_YES=1 ;;
+        -h|--help)           usage; exit 0 ;;
+        *)
+            printf '未知参数：%s\n\n' "$1"
+            usage
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+say()  { printf '%s\n' "$*"; }
+info() { printf '  %s\n' "$*"; }
+die()  { printf '\n✗ %s\n' "$*" >&2; exit 1; }
+
+# ---- 定位应用目录（settings.json / connections.json 所在处）----
+# 优先 TRIM_APPDEST（应用运行时目录），其次 cmd/ 的同级 app/，最后扫描各卷的默认安装路径。
+resolve_appdir() {
+    local cand sd
+    if [ -n "${TRIM_APPDEST:-}" ] && [ -d "${TRIM_APPDEST}" ]; then
+        (cd "$TRIM_APPDEST" && pwd -P)
+        return 0
+    fi
+    sd=$(cd "$(dirname "$0")" 2>/dev/null && pwd -P) || sd=""
+    if [ -n "$sd" ]; then
+        for cand in "$sd/../app" "$sd/.." "$sd"; do
+            if [ -f "$cand/server/server.js" ]; then
+                (cd "$cand" && pwd -P)
+                return 0
+            fi
+        done
+    fi
+    for cand in /vol*/@appcenter/$APP_NAME/app /vol*/@appcenter/$APP_NAME; do
+        if [ -f "$cand/server/server.js" ]; then
+            (cd "$cand" && pwd -P)
+            return 0
+        fi
+    done
+    return 1
+}
+
+# ---- 定位 node（应用已依赖 nodejs_v22，正常情况下一定存在）----
+find_node() {
+    local n
+    for n in /var/apps/nodejs_v22/target/bin/node /usr/local/bin/node /usr/bin/node; do
+        if [ -x "$n" ]; then printf '%s' "$n"; return 0; fi
+    done
+    n=$(command -v node 2>/dev/null) || n=""
+    if [ -n "$n" ] && [ -x "$n" ]; then printf '%s' "$n"; return 0; fi
+    return 1
+}
+
+APPDIR=$(resolve_appdir) || APPDIR=""
+if [ -z "$APPDIR" ]; then
+    die "没找到 sshx 应用目录。请确认应用已安装，再按下面的形式手动指定：
+     sudo bash /vol1/@appcenter/sshx/cmd/reset_pass"
+fi
+
+SETTINGS_FILE="$APPDIR/settings.json"
+CONNS_FILE="$APPDIR/connections.json"
+
+say ""
+say "sshx 面板密码清除工具"
+say "──────────────────────────────────────────────"
+info "应用目录 : $APPDIR"
+
+if [ ! -f "$SETTINGS_FILE" ]; then
+    say ""
+    say "未找到 settings.json —— 应用可能还没有设置过访问密码，无需处理。"
+    say ""
+    exit 0
+fi
+
+NODE_BIN=$(find_node) || NODE_BIN=""
+if [ -z "$NODE_BIN" ]; then
+    die "找不到 node 运行时。sshx 依赖 fnOS 的 nodejs_v22 应用，请先在应用中心确认它已安装。"
+fi
+
+# ---- 写权限预检 ----
+if [ "$MODE" != "show" ] && [ "$DRY" -eq 0 ] && [ ! -w "$SETTINGS_FILE" ]; then
+    if [ "$(id -u)" != "0" ]; then
+        die "没有写入权限，请用 sudo 执行：
+     sudo bash $0"
+    fi
+fi
+
+# ---- --purge-key 二次确认 ----
+if [ "$MODE" = "purge" ] && [ "$DRY" -eq 0 ] && [ "$ASSUME_YES" -eq 0 ]; then
+    say ""
+    say "⚠  --purge-key 会删除 encryptionKey，已保存的 SSH 密码将无法恢复。"
+    say "   如果只是忘了面板密码，请直接运行不带参数的本脚本。"
+    printf "   继续？输入 yes 回车确认: "
+    read -r ans </dev/tty 2>/dev/null || ans=""
+    if [ "$ans" != "yes" ]; then
+        say "已取消。"
+        exit 1
+    fi
+fi
+
+export SSHX_SETTINGS="$SETTINGS_FILE"
+export SSHX_CONNS="$CONNS_FILE"
+export SSHX_MODE="$MODE"
+export SSHX_DRY="$DRY"
+
+# ---- 由 node 负责 JSON 读写（不依赖 jq）----
+# 写完用 writeFileSync 覆盖同一个 inode，保证属主/权限不变（root 执行也不会把文件变成 root 所有）
+"$NODE_BIN" - <<'NODE_EOF'
+'use strict';
+const fs = require('fs');
+const path = require('path');
+
+const settingsPath = process.env.SSHX_SETTINGS;
+const connsPath = process.env.SSHX_CONNS || '';
+const mode = process.env.SSHX_MODE || 'reset';
+const dry = process.env.SSHX_DRY === '1';
+const KEEP_BACKUPS = 5;
+
+function readJson(p) {
+  let raw;
+  try { raw = fs.readFileSync(p, 'utf8'); }
+  catch (e) { throw new Error('无法读取 ' + p + '：' + e.message); }
+  raw = raw.replace(/^\uFEFF/, '');
+  if (!raw.trim()) return {};
+  try { return JSON.parse(raw); }
+  catch (e) { throw new Error(p + ' 不是合法 JSON：' + e.message); }
+}
+
+function stamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' +
+         p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+
+function backup(p) {
+  const bak = p + '.bak.' + stamp();
+  fs.copyFileSync(p, bak);           // 失败则抛出，由调用方中止
+  try {
+    const dir = path.dirname(p);
+    const prefix = path.basename(p) + '.bak.';
+    fs.readdirSync(dir)
+      .filter((f) => f.indexOf(prefix) === 0)
+      .map((f) => ({ f: f, t: fs.statSync(path.join(dir, f)).mtimeMs }))
+      .sort((a, b) => b.t - a.t)
+      .slice(KEEP_BACKUPS)
+      .forEach((x) => { try { fs.unlinkSync(path.join(dir, x.f)); } catch (e) {} });
+  } catch (e) { /* 清理旧备份失败不影响结果 */ }
+  return bak;
+}
+
+// ---- 读取 ----
+let settings;
+try { settings = readJson(settingsPath); }
+catch (e) { console.error('✗ ' + e.message); console.error('  文件未被修改。'); process.exit(2); }
+if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+  console.error('✗ settings.json 内容格式异常（不是 JSON 对象），已中止，文件未被修改。');
+  process.exit(2);
+}
+
+let conns = [];
+let connsNote = '';
+if (connsPath && fs.existsSync(connsPath)) {
+  try {
+    const a = readJson(connsPath);
+    if (Array.isArray(a)) conns = a;
+    else connsNote = '格式异常';
+  } catch (e) {
+    connsNote = '读取失败';
+  }
+}
+
+const hasHash = !!settings.appPasswordHash;
+const hasKey = !!settings.encryptionKey;
+const connCount = conns.length;
+const encCount = conns.filter((c) => c && c.hasEncryptedPassword).length;
+
+console.log('');
+console.log('当前状态：');
+console.log('  访问密码   : ' + (hasHash ? '已设置' : '未设置'));
+console.log('  加密密钥   : ' + (hasKey ? '存在' : '不存在'));
+console.log('  已保存连接 : ' + (connsNote
+  ? connsNote
+  : connCount + ' 个' + (encCount ? '（其中 ' + encCount + ' 个存有加密密码）' : '')));
+
+if (mode === 'show') process.exit(0);
+
+// ---- 计算改动 ----
+let changed = false;
+const notes = [];
+let cleared = 0;
+
+function need(key) {
+  changed = true;
+  notes.push(key);
+}
+
+if (hasHash) {
+  delete settings.appPasswordHash;
+  need('已清除访问密码');
+} else {
+  notes.push('本来就没有设置访问密码');
+}
+
+if (mode === 'purge') {
+  if (connsNote) {
+    console.error('');
+    console.error('✗ --purge-key 需要先清空 connections.json 里的密码，但该文件' + connsNote + '。');
+    console.error('  请先修复/删除 connections.json 再执行，本次未做任何修改。');
+    process.exit(4);
+  }
+  if (hasKey) {
+    delete settings.encryptionKey;
+    need('已删除 encryptionKey');
+  }
+  conns.forEach((c) => {
+    if (c && (c.password || c.hasEncryptedPassword)) {
+      c.password = '';
+      delete c.hasEncryptedPassword;
+      cleared++;
+    }
+  });
+  if (cleared > 0) need('已清空 ' + cleared + ' 条连接中保存的 SSH 密码');
+}
+
+console.log('');
+if (!changed) {
+  console.log('无需改动，文件保持原样。');
+  console.log('');
+  process.exit(0);
+}
+
+if (dry) {
+  console.log('拟执行（--dry-run，不写入文件）：');
+  notes.forEach((n) => console.log('  · ' + n));
+  console.log('');
+  process.exit(0);
+}
+
+// ---- 备份 → 写入（失败自动回滚）----
+let bakSettings = '';
+try { bakSettings = backup(settingsPath); }
+catch (e) { console.error('✗ 备份 settings.json 失败，为安全起见已中止：' + e.message); process.exit(3); }
+console.log('  已备份 : ' + path.basename(bakSettings));
+let bakConns = '';
+if (mode === 'purge' && cleared > 0) {
+  try { bakConns = backup(connsPath); }
+  catch (e) { console.error('✗ 备份 connections.json 失败，为安全起见已中止：' + e.message); process.exit(3); }
+  console.log('  已备份 : ' + path.basename(bakConns));
+}
+
+console.log('');
+console.log('执行结果：');
+notes.forEach((n) => console.log('  · ' + n));
+
+try {
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  if (mode === 'purge' && cleared > 0) fs.writeFileSync(connsPath, JSON.stringify(conns, null, 2) + '\n', 'utf8');
+} catch (e) {
+  console.error('');
+  console.error('✗ 写入失败：' + e.message);
+  try {
+    fs.copyFileSync(bakSettings, settingsPath);
+    console.error('  已自动从备份回滚 settings.json');
+  } catch (e2) {
+    console.error('  自动回滚失败，请手工恢复：' + bakSettings);
+  }
+  process.exit(5);
+}
+
+// 回写后再校验一次，确保落盘的是合法 JSON
+try {
+  const check = readJson(settingsPath);
+  if (!check || typeof check !== 'object') throw new Error('回读内容异常');
+} catch (e) {
+  console.error('');
+  console.error('✗ 写入后校验失败：' + e.message);
+  process.exit(5);
+}
+
+console.log('');
+NODE_EOF
+rc=$?
+
+if [ $rc -ne 0 ]; then
+    say ""
+    case $rc in
+        2) say "解析失败：settings.json 可能被手工改坏了，文件未改动。" ;;
+        3) say "备份失败：未做任何修改。" ;;
+        4) say "已中止：见上方提示。" ;;
+        5) say "写入失败：请检查目录权限，并按提示用备份回滚。" ;;
+    esac
+    exit $rc
+fi
+
+say "──────────────────────────────────────────────"
+if [ "$MODE" != "show" ] && [ "$DRY" -eq 0 ]; then
+    say "刷新浏览器页面即可重新设置访问密码（至少 4 位）。"
+    say "服务端每次请求都会重读配置，无需重启应用。"
+    say ""
+fi
+
+exit 0

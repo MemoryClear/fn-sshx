@@ -212,10 +212,13 @@ function handleApi(req, res) {
           return;
         }
         const hash = sha256(pw);
-        const encKey = deriveKey(hash);
+        // 保留已有的 encryptionKey：连接密码是用它加密的，
+        // 若每次设置/重置面板密码都重新派生密钥，历史连接密码就再也解不开了。
+        const prevKey = loadSettings().encryptionKey;
+        const encKey = prevKey || deriveKey(hash).toString('hex');
         saveSettings({ 
           appPasswordHash: hash, 
-          encryptionKey: encKey.toString('hex')
+          encryptionKey: encKey
         });
         sendJson(res, 200, { ok: true, token: hash });
       });
