@@ -29,5 +29,5 @@ $rawStyle = ([regex]::Matches($html, '</style>')).Count
 $escStyle = ([regex]::Matches($html, '<\\/style>')).Count
 Write-Output ("单文件生成: 字节={0}  裸 </script>={1}  转义 <\/script>={2}  裸 </style>={3}  转义 <\/style>={4}" -f $html.Length,$rawClose,$escClose,$rawStyle,$escStyle)
 Write-Output ("前4字节 (期望 3C 21 44 4F = <!DO): {0}" -f (([byte[]][char[]]$html.Substring(0,4) | ForEach-Object {'{0:X2}' -f $_}) -join ' '))
-$probes = @('id="sidebar"','id="brand"','id="logoutBtn"','id="addConnBtn"','id="connectBtn"','id="terminals"','id="connModal"','id="diag"','renderWelcome')
+$probes = @('id="sidebar"','id="brand"','id="logoutBtn"','id="addConnBtn"','id="connectBtn"','id="terminals"','id="connModal"','id="diag"','id="fontSizeVal"','renderWelcome')
 foreach($p in $probes){ Write-Output ("  $p : {0}" -f ($html -match [regex]::Escape($p))) }

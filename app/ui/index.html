@@ -707,11 +707,51 @@ body { overflow: hidden; }
 }
 #encodingSel:hover { background: #2a2a2a; border-color: #555; }
 #encodingSel:focus { border-color: #0e639c; }
+
+/* ---- 终端字号调节（状态栏） ---- */
+.font-size-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 10px;
+}
+.fs-btn {
+  min-width: 22px;
+  height: 18px;
+  padding: 0 5px;
+  background: #1e1e1e;
+  color: #e0e0e0;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+.fs-btn:hover { background: #2a2a2a; border-color: #555; }
+.fs-btn:active { background: #0e639c; border-color: #0e639c; color: #fff; }
+.fs-btn:disabled { color: #666; cursor: default; background: #1e1e1e; border-color: #333; }
+.fs-btn:disabled:hover { background: #1e1e1e; border-color: #333; }
+.fs-val {
+  min-width: 20px;
+  text-align: center;
+  font-size: 12px;
+  color: #e0e0e0;
+  cursor: pointer;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.fs-val:hover { color: #4ec9b0; }
+
 /* 640px 移动端：状态栏继续显示但内容简化 */
 @media (max-width: 640px) {
   #statusLeft { font-size: 11px; }
   .enc-label { display: none; }
   #encodingSel { font-size: 11px; }
+  .font-size-wrap { margin-right: 6px; gap: 2px; }
+  .fs-btn { min-width: 18px; height: 17px; padding: 0 3px; font-size: 10px; }
+  .fs-val { min-width: 16px; font-size: 11px; }
 }
 
   </style>
@@ -766,6 +806,12 @@ body { overflow: hidden; }
     <div id="terminals"></div>
     <div id="statusBar">
       <span id="statusLeft"></span>
+      <div class="font-size-wrap" title="终端字号（终端内 Ctrl + 滚轮也可调整）">
+        <span class="enc-label">字号:</span>
+        <button id="fontDec" class="fs-btn" type="button" title="减小字号">A−</button>
+        <span id="fontSizeVal" class="fs-val" title="点击恢复默认字号">14</span>
+        <button id="fontInc" class="fs-btn" type="button" title="增大字号">A+</button>
+      </div>
       <label class="enc-select-wrap">
         <span class="enc-label">编码:</span>
         <select id="encodingSel">
@@ -965,6 +1011,105 @@ window.renderWelcome = function (term) {
   var sidebarCollapsed = false;
   var searchQuery = '';
   var editingId = null;
+
+  // ---- 终端字号 (状态栏 A- / A+ ) ----
+  // 字号属于「本机显示偏好」，跟着浏览器走比存服务端更合理（手机和平板本就该不一样）。
+  var FONT_MIN = 8;
+  var FONT_MAX = 32;
+  var FONT_DEFAULT = 14;
+  var FONT_STEP = 1;
+  var FONT_LS_KEY = 'sshx_font_size';
+
+  function clampFontSize(px) {
+    var n = parseInt(px, 10);
+    if (isNaN(n)) return FONT_DEFAULT;
+    return Math.max(FONT_MIN, Math.min(FONT_MAX, n));
+  }
+  function readFontSize() {
+    var v = null;
+    try { v = localStorage.getItem(FONT_LS_KEY); } catch (e) {}
+    if (v === null || v === '') return FONT_DEFAULT;
+    return clampFontSize(v);
+  }
+  var currentFontSize = readFontSize();
+
+  function renderFontSizeUI() {
+    var val = el('fontSizeVal');
+    if (val) val.textContent = String(currentFontSize);
+    var dec = el('fontDec');
+    if (dec) dec.disabled = currentFontSize <= FONT_MIN;
+    var inc = el('fontInc');
+    if (inc) inc.disabled = currentFontSize >= FONT_MAX;
+  }
+
+  // xterm 5.x 用 options 代理，4.x 用 setOption，两套都兼容着写
+  function setTermFontSize(term, px) {
+    if (!term) return false;
+    try {
+      if (term.options && typeof term.options === 'object') { term.options.fontSize = px; return true; }
+      if (typeof term.setOption === 'function') { term.setOption('fontSize', px); return true; }
+    } catch (e) {
+      diag('[font] 设置字号失败: ' + e);
+    }
+    return false;
+  }
+
+  // 把某个 tab 的字号对齐到 currentFontSize，并重新 fit + 把新行列数推给 pty
+  function applyFontToTab(id) {
+    var t = tabs[id];
+    if (!t || !t.term) return;
+    setTermFontSize(t.term, currentFontSize);
+    t.pendingFontSize = null;
+    if (t.fitAddon) { try { t.fitAddon.fit(); } catch (e) {} }
+    sendTermSize(id);
+  }
+
+  var fontApplyTimer = null;
+  function setFontSize(px) {
+    var next = clampFontSize(px);
+    if (next === currentFontSize) { renderFontSizeUI(); return; }
+    currentFontSize = next;
+    try { localStorage.setItem(FONT_LS_KEY, String(currentFontSize)); } catch (e) {}
+    renderFontSizeUI();
+    Object.keys(tabs).forEach(function (id) {
+      var t = tabs[id];
+      if (!t || !t.term) return;
+      if (id === activeId) return; // 当前可见的走下面的定时器统一处理
+      // 后台 tab 是 display:none，此刻 fit 量不出真实尺寸，改字号会把假的
+      // 行列数推给 pty（表现为切换回去后命令折行错位）。所以只记账，激活时再应用。
+      t.pendingFontSize = currentFontSize;
+    });
+    // Ctrl+滚轮会连发事件，合并一次再 fit/resize，避免连续抖动和刷屏
+    if (fontApplyTimer) clearTimeout(fontApplyTimer);
+    fontApplyTimer = setTimeout(function () {
+      fontApplyTimer = null;
+      if (activeId && tabs[activeId]) applyFontToTab(activeId);
+    }, 50);
+    diag('[font] 字号 = ' + currentFontSize + 'px');
+  }
+
+  (function bindFontControls() {
+    var dec = el('fontDec');
+    var inc = el('fontInc');
+    var val = el('fontSizeVal');
+    if (dec) dec.onclick = function () { setFontSize(currentFontSize - FONT_STEP); };
+    if (inc) inc.onclick = function () { setFontSize(currentFontSize + FONT_STEP); };
+    if (val) {
+      val.title = '点击恢复默认字号 (' + FONT_DEFAULT + ')';
+      val.onclick = function () { setFontSize(FONT_DEFAULT); };
+    }
+    renderFontSizeUI();
+    // Ctrl + 滚轮缩放（终端内），capture 阶段抢在 xterm 的滚轮滚动之前拦下
+    var termBox = el('terminals');
+    if (termBox) {
+      termBox.addEventListener('wheel', function (e) {
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setFontSize(currentFontSize + (e.deltaY < 0 ? FONT_STEP : -FONT_STEP));
+      }, { passive: false, capture: true });
+    }
+  })();
 
   // 统一的断开提示函数（防止重复显示）
   function showDisconnectPrompt(tabId, term, errorMsg) {
@@ -1255,7 +1400,7 @@ window.renderWelcome = function (term) {
       el('terminals').appendChild(termDiv);
     }
 
-    var term = new Terminal({ cursorBlink: true, fontSize: 14, fontFamily: 'Consolas, "Courier New", monospace', theme: { background: '#1e1e1e', foreground: '#d4d4d4', cursor: '#aaaaaa' }, allowProposedApi: true });
+    var term = new Terminal({ cursorBlink: true, fontSize: currentFontSize, fontFamily: 'Consolas, "Courier New", monospace', theme: { background: '#1e1e1e', foreground: '#d4d4d4', cursor: '#aaaaaa' }, allowProposedApi: true });
     term.open(termDiv);
     // 拦截 R 键重连（xterm 会阻止事件冒泡到 document）
     term.attachCustomKeyEventHandler(function (e) {
@@ -1441,6 +1586,12 @@ window.renderWelcome = function (term) {
       if (d) d.classList.toggle('active', tid === id);
     });
     var t = tabs[id];
+    // 在隐藏状态下改过字号的 tab，在这儿补上：此时容器已可见，fit 才量得准
+    if (t && t.term && t.pendingFontSize) {
+      setTermFontSize(t.term, t.pendingFontSize);
+      t.pendingFontSize = null;
+      diag('[activateTab] 应用待生效字号 = ' + currentFontSize + 'px tab=' + id);
+    }
     if (t && t.term && t.fitAddon) {
       diag('[activateTab] fit term tab=' + id);
       // 输出容器尺寸诊断

@@ -60,6 +60,12 @@
     <div id="terminals"></div>
     <div id="statusBar">
       <span id="statusLeft"></span>
+      <div class="font-size-wrap" title="终端字号（终端内 Ctrl + 滚轮也可调整）">
+        <span class="enc-label">字号:</span>
+        <button id="fontDec" class="fs-btn" type="button" title="减小字号">A−</button>
+        <span id="fontSizeVal" class="fs-val" title="点击恢复默认字号">14</span>
+        <button id="fontInc" class="fs-btn" type="button" title="增大字号">A+</button>
+      </div>
       <label class="enc-select-wrap">
         <span class="enc-label">编码:</span>
         <select id="encodingSel">
