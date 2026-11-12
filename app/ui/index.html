@@ -708,8 +708,8 @@ body { overflow: hidden; }
 #encodingSel:hover { background: #2a2a2a; border-color: #555; }
 #encodingSel:focus { border-color: #0e639c; }
 
-/* ---- 终端字号调节（状态栏） ---- */
-.font-size-wrap {
+/* ---- 终端字号 / 字体（状态栏） ---- */
+.font-ctrl {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -733,25 +733,43 @@ body { overflow: hidden; }
 .fs-btn:active { background: #0e639c; border-color: #0e639c; color: #fff; }
 .fs-btn:disabled { color: #666; cursor: default; background: #1e1e1e; border-color: #333; }
 .fs-btn:disabled:hover { background: #1e1e1e; border-color: #333; }
-.fs-val {
-  min-width: 20px;
-  text-align: center;
-  font-size: 12px;
+.fs-sel {
+  height: 18px;
+  padding: 0 2px;
+  background: #1e1e1e;
   color: #e0e0e0;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  font-size: 12px;
   cursor: pointer;
-  user-select: none;
-  font-variant-numeric: tabular-nums;
+  outline: none;
+  max-width: 170px;
 }
-.fs-val:hover { color: #4ec9b0; }
+.fs-sel:hover { background: #2a2a2a; border-color: #555; }
+.fs-sel:focus { border-color: #0e639c; }
+.fs-family { max-width: 150px; }
+.fs-custom {
+  height: 18px;
+  width: 150px;
+  padding: 0 6px;
+  background: #1e1e1e;
+  color: #e0e0e0;
+  border: 1px solid #0e639c;
+  border-radius: 4px;
+  font-size: 12px;
+  outline: none;
+}
 
 /* 640px 移动端：状态栏继续显示但内容简化 */
 @media (max-width: 640px) {
   #statusLeft { font-size: 11px; }
   .enc-label { display: none; }
   #encodingSel { font-size: 11px; }
-  .font-size-wrap { margin-right: 6px; gap: 2px; }
-  .fs-btn { min-width: 18px; height: 17px; padding: 0 3px; font-size: 10px; }
-  .fs-val { min-width: 16px; font-size: 11px; }
+  .font-ctrl { margin-right: 6px; gap: 3px; }
+  .fs-btn { display: none; }            /* 手机空间紧，只留下拉 */
+  #fontSizeSel { font-size: 11px; }
+  #fontFamilySel { font-size: 11px; max-width: 104px; }
+  .fs-custom { width: 96px; font-size: 11px; }
 }
 
   </style>
@@ -806,11 +824,14 @@ body { overflow: hidden; }
     <div id="terminals"></div>
     <div id="statusBar">
       <span id="statusLeft"></span>
-      <div class="font-size-wrap" title="终端字号（终端内 Ctrl + 滚轮也可调整）">
+      <div class="font-ctrl" title="终端字号与字体（终端内 Ctrl + 滚轮也可调整字号）">
         <span class="enc-label">字号:</span>
         <button id="fontDec" class="fs-btn" type="button" title="减小字号">A−</button>
-        <span id="fontSizeVal" class="fs-val" title="点击恢复默认字号">14</span>
+        <select id="fontSizeSel" class="fs-sel" title="终端字号"></select>
         <button id="fontInc" class="fs-btn" type="button" title="增大字号">A+</button>
+        <span class="enc-label">字体:</span>
+        <select id="fontFamilySel" class="fs-sel fs-family" title="终端字体"></select>
+        <input id="fontFamilyCustom" class="fs-custom" type="text" placeholder="等宽字体名，回车应用" style="display:none;" />
       </div>
       <label class="enc-select-wrap">
         <span class="enc-label">编码:</span>
@@ -1012,93 +1033,202 @@ window.renderWelcome = function (term) {
   var searchQuery = '';
   var editingId = null;
 
-  // ---- 终端字号 (状态栏 A- / A+ ) ----
-  // 字号属于「本机显示偏好」，跟着浏览器走比存服务端更合理（手机和平板本就该不一样）。
+  // ---- 终端字号 / 字体 (状态栏下拉) ----
+  // 两者都是「本机显示偏好」，跟着浏览器走比存服务端更合理（手机和平板本就该不一样）。
   var FONT_MIN = 8;
   var FONT_MAX = 32;
   var FONT_DEFAULT = 14;
   var FONT_STEP = 1;
-  var FONT_LS_KEY = 'sshx_font_size';
+  var FONT_SIZE_LS = 'sshx_font_size';
+  var FONT_FAMILY_LS = 'sshx_font_family';
+  var FONT_FAMILY_DEFAULT = 'Consolas, "Courier New", monospace';
+  var FONT_CUSTOM = '__custom__';
+  // 全是等宽字体栈，末尾统一兜底 monospace：客户端缺哪个字体就自动往后退一级。
+  // xterm 按等宽字符算格子，选到比例字体一定会错位，所以列表里不放大黑/雅黑这类。
+  var FONT_PRESETS = [
+    { label: 'Consolas（默认）', value: FONT_FAMILY_DEFAULT },
+    { label: 'Cascadia Code', value: '"Cascadia Code", "Cascadia Mono", Consolas, monospace' },
+    { label: 'JetBrains Mono', value: '"JetBrains Mono", Consolas, monospace' },
+    { label: 'Fira Code', value: '"Fira Code", Consolas, monospace' },
+    { label: 'Source Code Pro', value: '"Source Code Pro", Consolas, monospace' },
+    { label: 'Menlo / Monaco', value: 'Menlo, Monaco, Consolas, monospace' },
+    { label: 'DejaVu Sans Mono', value: '"DejaVu Sans Mono", "Liberation Mono", monospace' },
+    { label: 'Ubuntu Mono', value: '"Ubuntu Mono", "DejaVu Sans Mono", monospace' },
+    { label: 'Sarasa Mono SC', value: '"Sarasa Mono SC", "Sarasa Mono", Consolas, monospace' },
+    { label: 'Noto Sans Mono CJK', value: '"Noto Sans Mono CJK SC", "Noto Sans Mono", monospace' },
+    { label: 'Courier New', value: '"Courier New", Courier, monospace' },
+    { label: '系统等宽', value: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+    { label: '自定义…', value: FONT_CUSTOM }
+  ];
+  var fontState = { size: FONT_DEFAULT, family: FONT_FAMILY_DEFAULT };
 
   function clampFontSize(px) {
     var n = parseInt(px, 10);
     if (isNaN(n)) return FONT_DEFAULT;
     return Math.max(FONT_MIN, Math.min(FONT_MAX, n));
   }
-  function readFontSize() {
-    var v = null;
-    try { v = localStorage.getItem(FONT_LS_KEY); } catch (e) {}
-    if (v === null || v === '') return FONT_DEFAULT;
-    return clampFontSize(v);
+  function readFontState() {
+    var s = FONT_DEFAULT;
+    var f = FONT_FAMILY_DEFAULT;
+    try {
+      var v = localStorage.getItem(FONT_SIZE_LS);
+      if (v !== null && v !== '') s = clampFontSize(v);
+      var ff = localStorage.getItem(FONT_FAMILY_LS);
+      if (ff) f = String(ff);
+    } catch (e) {}
+    return { size: s, family: f };
   }
-  var currentFontSize = readFontSize();
+  fontState = readFontState();
 
-  function renderFontSizeUI() {
-    var val = el('fontSizeVal');
-    if (val) val.textContent = String(currentFontSize);
+  function isPresetFamily(v) {
+    for (var i = 0; i < FONT_PRESETS.length; i++) { if (FONT_PRESETS[i].value === v) return true; }
+    return false;
+  }
+
+  function buildFontOptions() {
+    var sizeSel = el('fontSizeSel');
+    if (sizeSel && !sizeSel.options.length) {
+      for (var i = FONT_MIN; i <= FONT_MAX; i++) {
+        var o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = String(i);
+        sizeSel.appendChild(o);
+      }
+    }
+    var famSel = el('fontFamilySel');
+    if (famSel && !famSel.options.length) {
+      FONT_PRESETS.forEach(function (p) {
+        var o = document.createElement('option');
+        o.value = p.value;
+        o.textContent = p.label;
+        famSel.appendChild(o);
+      });
+    }
+  }
+
+  function syncFontUI() {
+    var sizeSel = el('fontSizeSel');
+    if (sizeSel) sizeSel.value = String(fontState.size);
+    var preset = isPresetFamily(fontState.family);
+    var famSel = el('fontFamilySel');
+    if (famSel) famSel.value = preset ? fontState.family : FONT_CUSTOM;
+    var custom = el('fontFamilyCustom');
+    if (custom) {
+      custom.style.display = preset ? 'none' : '';
+      if (!preset) custom.value = fontState.family;
+    }
     var dec = el('fontDec');
-    if (dec) dec.disabled = currentFontSize <= FONT_MIN;
+    if (dec) dec.disabled = fontState.size <= FONT_MIN;
     var inc = el('fontInc');
-    if (inc) inc.disabled = currentFontSize >= FONT_MAX;
+    if (inc) inc.disabled = fontState.size >= FONT_MAX;
   }
 
   // xterm 5.x 用 options 代理，4.x 用 setOption，两套都兼容着写
-  function setTermFontSize(term, px) {
+  function setTermFont(term, size, family) {
     if (!term) return false;
     try {
-      if (term.options && typeof term.options === 'object') { term.options.fontSize = px; return true; }
-      if (typeof term.setOption === 'function') { term.setOption('fontSize', px); return true; }
+      if (term.options && typeof term.options === 'object') {
+        if (term.options.fontFamily !== family) term.options.fontFamily = family;
+        if (term.options.fontSize !== size) term.options.fontSize = size;
+        return true;
+      }
+      if (typeof term.setOption === 'function') {
+        term.setOption('fontFamily', family);
+        term.setOption('fontSize', size);
+        return true;
+      }
     } catch (e) {
-      diag('[font] 设置字号失败: ' + e);
+      diag('[font] 应用字体失败: ' + e);
     }
     return false;
   }
 
-  // 把某个 tab 的字号对齐到 currentFontSize，并重新 fit + 把新行列数推给 pty
+  // 把某个 tab 的字号/字体对齐到 fontState，并重新 fit + 把新行列数推给 pty
   function applyFontToTab(id) {
     var t = tabs[id];
     if (!t || !t.term) return;
-    setTermFontSize(t.term, currentFontSize);
-    t.pendingFontSize = null;
+    setTermFont(t.term, fontState.size, fontState.family);
+    t.fontDirty = false;
     if (t.fitAddon) { try { t.fitAddon.fit(); } catch (e) {} }
     sendTermSize(id);
   }
 
   var fontApplyTimer = null;
-  function setFontSize(px) {
-    var next = clampFontSize(px);
-    if (next === currentFontSize) { renderFontSizeUI(); return; }
-    currentFontSize = next;
-    try { localStorage.setItem(FONT_LS_KEY, String(currentFontSize)); } catch (e) {}
-    renderFontSizeUI();
+  function commitFont(patch) {
+    if (patch && patch.size !== undefined) fontState.size = clampFontSize(patch.size);
+    if (patch && patch.family !== undefined) {
+      fontState.family = String(patch.family || '').replace(/^\s+|\s+$/g, '') || FONT_FAMILY_DEFAULT;
+    }
+    try {
+      localStorage.setItem(FONT_SIZE_LS, String(fontState.size));
+      localStorage.setItem(FONT_FAMILY_LS, fontState.family);
+    } catch (e) {}
+    syncFontUI();
     Object.keys(tabs).forEach(function (id) {
       var t = tabs[id];
       if (!t || !t.term) return;
-      if (id === activeId) return; // 当前可见的走下面的定时器统一处理
-      // 后台 tab 是 display:none，此刻 fit 量不出真实尺寸，改字号会把假的
-      // 行列数推给 pty（表现为切换回去后命令折行错位）。所以只记账，激活时再应用。
-      t.pendingFontSize = currentFontSize;
+      if (id !== activeId) {
+        // 后台 tab 是 display:none，此刻量不出真实尺寸，换字号/字体会把假的
+        // 行列数推给 pty（表现为切换回去后命令折行错位）。所以只记账，激活时再应用。
+        t.fontDirty = true;
+      }
     });
-    // Ctrl+滚轮会连发事件，合并一次再 fit/resize，避免连续抖动和刷屏
+    // 下拉连选 / Ctrl+滚轮连发时合并成一次，避免连续 fit + resize 刷屏
     if (fontApplyTimer) clearTimeout(fontApplyTimer);
     fontApplyTimer = setTimeout(function () {
       fontApplyTimer = null;
       if (activeId && tabs[activeId]) applyFontToTab(activeId);
     }, 50);
-    diag('[font] 字号 = ' + currentFontSize + 'px');
+    diag('[font] ' + fontState.size + 'px / ' + fontState.family);
   }
 
   (function bindFontControls() {
+    buildFontOptions();
+    syncFontUI();
+
+    var sizeSel = el('fontSizeSel');
+    if (sizeSel) sizeSel.onchange = function () { commitFont({ size: sizeSel.value }); };
+
     var dec = el('fontDec');
+    if (dec) dec.onclick = function () { commitFont({ size: fontState.size - FONT_STEP }); };
     var inc = el('fontInc');
-    var val = el('fontSizeVal');
-    if (dec) dec.onclick = function () { setFontSize(currentFontSize - FONT_STEP); };
-    if (inc) inc.onclick = function () { setFontSize(currentFontSize + FONT_STEP); };
-    if (val) {
-      val.title = '点击恢复默认字号 (' + FONT_DEFAULT + ')';
-      val.onclick = function () { setFontSize(FONT_DEFAULT); };
+    if (inc) inc.onclick = function () { commitFont({ size: fontState.size + FONT_STEP }); };
+
+    var famSel = el('fontFamilySel');
+    var custom = el('fontFamilyCustom');
+    if (famSel) famSel.onchange = function () {
+      if (famSel.value === FONT_CUSTOM) {
+        // 选「自定义」先不落地，等用户把字体名敲进来
+        if (custom) {
+          custom.style.display = '';
+          custom.value = isPresetFamily(fontState.family) ? '' : fontState.family;
+          custom.focus();
+          custom.select();
+        }
+        return;
+      }
+      commitFont({ family: famSel.value });
+      if (custom) custom.style.display = 'none';
+    };
+    if (custom) {
+      custom.onkeydown = function (e) {
+        if (e.key === 'Enter') {
+          var v = custom.value.trim();
+          if (!v) return;
+          commitFont({ family: v });
+          custom.blur();
+        } else if (e.key === 'Escape') {
+          custom.value = '';
+          syncFontUI();
+          custom.blur();
+        }
+      };
+      // 空着离开就退回原字体，别让下拉停在「自定义」上
+      custom.onblur = function () {
+        if (!custom.value.trim()) syncFontUI();
+      };
     }
-    renderFontSizeUI();
+
     // Ctrl + 滚轮缩放（终端内），capture 阶段抢在 xterm 的滚轮滚动之前拦下
     var termBox = el('terminals');
     if (termBox) {
@@ -1106,7 +1236,7 @@ window.renderWelcome = function (term) {
         if (!e.ctrlKey) return;
         e.preventDefault();
         e.stopPropagation();
-        setFontSize(currentFontSize + (e.deltaY < 0 ? FONT_STEP : -FONT_STEP));
+        commitFont({ size: fontState.size + (e.deltaY < 0 ? FONT_STEP : -FONT_STEP) });
       }, { passive: false, capture: true });
     }
   })();
@@ -1400,7 +1530,7 @@ window.renderWelcome = function (term) {
       el('terminals').appendChild(termDiv);
     }
 
-    var term = new Terminal({ cursorBlink: true, fontSize: currentFontSize, fontFamily: 'Consolas, "Courier New", monospace', theme: { background: '#1e1e1e', foreground: '#d4d4d4', cursor: '#aaaaaa' }, allowProposedApi: true });
+    var term = new Terminal({ cursorBlink: true, fontSize: fontState.size, fontFamily: fontState.family, theme: { background: '#1e1e1e', foreground: '#d4d4d4', cursor: '#aaaaaa' }, allowProposedApi: true });
     term.open(termDiv);
     // 拦截 R 键重连（xterm 会阻止事件冒泡到 document）
     term.attachCustomKeyEventHandler(function (e) {
@@ -1587,10 +1717,10 @@ window.renderWelcome = function (term) {
     });
     var t = tabs[id];
     // 在隐藏状态下改过字号的 tab，在这儿补上：此时容器已可见，fit 才量得准
-    if (t && t.term && t.pendingFontSize) {
-      setTermFontSize(t.term, t.pendingFontSize);
-      t.pendingFontSize = null;
-      diag('[activateTab] 应用待生效字号 = ' + currentFontSize + 'px tab=' + id);
+    if (t && t.term && t.fontDirty) {
+      setTermFont(t.term, fontState.size, fontState.family);
+      t.fontDirty = false;
+      diag('[activateTab] 应用待生效字体 = ' + fontState.size + 'px / ' + fontState.family + ' tab=' + id);
     }
     if (t && t.term && t.fitAddon) {
       diag('[activateTab] fit term tab=' + id);

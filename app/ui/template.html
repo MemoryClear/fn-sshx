@@ -60,11 +60,14 @@
     <div id="terminals"></div>
     <div id="statusBar">
       <span id="statusLeft"></span>
-      <div class="font-size-wrap" title="终端字号（终端内 Ctrl + 滚轮也可调整）">
+      <div class="font-ctrl" title="终端字号与字体（终端内 Ctrl + 滚轮也可调整字号）">
         <span class="enc-label">字号:</span>
         <button id="fontDec" class="fs-btn" type="button" title="减小字号">A−</button>
-        <span id="fontSizeVal" class="fs-val" title="点击恢复默认字号">14</span>
+        <select id="fontSizeSel" class="fs-sel" title="终端字号"></select>
         <button id="fontInc" class="fs-btn" type="button" title="增大字号">A+</button>
+        <span class="enc-label">字体:</span>
+        <select id="fontFamilySel" class="fs-sel fs-family" title="终端字体"></select>
+        <input id="fontFamilyCustom" class="fs-custom" type="text" placeholder="等宽字体名，回车应用" style="display:none;" />
       </div>
       <label class="enc-select-wrap">
         <span class="enc-label">编码:</span>

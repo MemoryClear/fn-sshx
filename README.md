@@ -7,7 +7,7 @@
 ## 功能
 
 - 多标签 SSH 终端
-- 终端字号可调（8–32px，状态栏 `A-` / `A+` 或 Ctrl + 滚轮，按浏览器记住）
+- 终端字号与字体可调（字号 8–32px 下拉 / `A-` `A+` / Ctrl + 滚轮；字体可选 Consolas、Cascadia Code、JetBrains Mono、Fira Code、更纱黑体等，也支持自定义字体栈，按浏览器记住）
 - 连接保存与分组管理
 - 访问密码保护
 - 密码加密存储（AES-256-GCM）
