@@ -733,24 +733,40 @@ body { overflow: hidden; }
 .fs-btn:active { background: #0e639c; border-color: #0e639c; color: #fff; }
 .fs-btn:disabled { color: #666; cursor: default; background: #1e1e1e; border-color: #333; }
 .fs-btn:disabled:hover { background: #1e1e1e; border-color: #333; }
-.fs-sel {
+
+/* 触发按钮（自绘 select，原生 select 的弹出层改不了样式） */
+.fs-picker { position: relative; flex: 0 0 auto; display: flex; }
+.fs-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   height: 18px;
-  padding: 0 2px;
+  padding: 0 4px;
+  max-width: 92px;
   background: #1e1e1e;
   color: #e0e0e0;
   border: 1px solid #3c3c3c;
   border-radius: 4px;
   font-size: 12px;
+  line-height: 1;
   cursor: pointer;
   outline: none;
-  max-width: 170px;
 }
-.fs-sel:hover { background: #2a2a2a; border-color: #555; }
-.fs-sel:focus { border-color: #0e639c; }
-.fs-family { max-width: 150px; }
+.fs-toggle:hover { background: #2a2a2a; border-color: #555; }
+.fs-toggle.open { border-color: #0e639c; }
+.fs-toggle-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-caret {
+  flex: 0 0 auto;
+  width: 0; height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid #9aa0a6;
+  margin-top: 1px;
+}
+.fs-toggle-wide { max-width: 148px; }
 .fs-custom {
   height: 18px;
-  width: 150px;
+  width: 148px;
   padding: 0 6px;
   background: #1e1e1e;
   color: #e0e0e0;
@@ -760,6 +776,50 @@ body { overflow: hidden; }
   outline: none;
 }
 
+/* 下拉面板：深色 + 6px 细滚动条，和整体配色一致 */
+.fs-menu {
+  position: fixed;
+  display: none;
+  z-index: 9500;
+  min-width: 84px;
+  max-height: 232px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #252526;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  padding: 3px 0;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  scrollbar-width: thin;
+  scrollbar-color: #4a4a4a transparent;
+}
+.fs-menu.show { display: block; }
+.fs-menu.show.fs-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+  min-width: 104px;
+  padding: 4px;
+}
+.fs-opt {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #d4d4d4;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-opt:hover { background: #094771; color: #fff; }
+.fs-opt.active { background: #0e639c; color: #fff; }
+.fs-menu-grid .fs-opt { padding: 4px 0; text-align: center; border-radius: 3px; }
+.fs-menu-family { min-width: 150px; max-width: 230px; }
+.fs-menu::-webkit-scrollbar { width: 6px; }
+.fs-menu::-webkit-scrollbar-track { background: transparent; }
+.fs-menu::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 3px; }
+.fs-menu::-webkit-scrollbar-thumb:hover { background: #6a6a6a; }
+.fs-menu::-webkit-scrollbar-corner { background: transparent; }
+
 /* 640px 移动端：状态栏继续显示但内容简化 */
 @media (max-width: 640px) {
   #statusLeft { font-size: 11px; }
@@ -767,9 +827,11 @@ body { overflow: hidden; }
   #encodingSel { font-size: 11px; }
   .font-ctrl { margin-right: 6px; gap: 3px; }
   .fs-btn { display: none; }            /* 手机空间紧，只留下拉 */
-  #fontSizeSel { font-size: 11px; }
-  #fontFamilySel { font-size: 11px; max-width: 104px; }
-  .fs-custom { width: 96px; font-size: 11px; }
+  .fs-toggle { font-size: 11px; }
+  .fs-toggle-wide { max-width: 104px; }
+  .fs-custom { width: 104px; font-size: 11px; }
+  .fs-menu { max-height: 200px; }
+  .fs-opt { font-size: 12px; }
 }
 
   </style>
@@ -827,11 +889,22 @@ body { overflow: hidden; }
       <div class="font-ctrl" title="终端字号与字体（终端内 Ctrl + 滚轮也可调整字号）">
         <span class="enc-label">字号:</span>
         <button id="fontDec" class="fs-btn" type="button" title="减小字号">A−</button>
-        <select id="fontSizeSel" class="fs-sel" title="终端字号"></select>
+        <div class="fs-picker" id="fontSizePicker">
+          <button id="fontSizeToggle" class="fs-toggle" type="button" title="选择字号">
+            <span class="fs-toggle-label" id="fontSizeLabel">14</span><span class="fs-caret"></span>
+          </button>
+          <div class="fs-menu fs-menu-grid" id="fontSizeMenu"></div>
+        </div>
         <button id="fontInc" class="fs-btn" type="button" title="增大字号">A+</button>
         <span class="enc-label">字体:</span>
-        <select id="fontFamilySel" class="fs-sel fs-family" title="终端字体"></select>
-        <input id="fontFamilyCustom" class="fs-custom" type="text" placeholder="等宽字体名，回车应用" style="display:none;" />
+        <div class="fs-picker" id="fontFamilyPicker">
+          <button id="fontFamilyToggle" class="fs-toggle fs-toggle-wide" type="button" title="选择字体">
+            <span class="fs-toggle-label" id="fontFamilyLabel">Consolas</span><span class="fs-caret"></span>
+          </button>
+          <div class="fs-menu fs-menu-family" id="fontFamilyMenu"></div>
+        </div>
+        <button id="fontCustomBtn" class="fs-btn" type="button" title="手动输入字体名">✎</button>
+        <input id="fontFamilyCustom" class="fs-custom" type="text" placeholder="字体名，回车应用" style="display:none;" />
       </div>
       <label class="enc-select-wrap">
         <span class="enc-label">编码:</span>
@@ -1033,46 +1106,57 @@ window.renderWelcome = function (term) {
   var searchQuery = '';
   var editingId = null;
 
-  // ---- 终端字号 / 字体 (状态栏下拉) ----
+  // ---- 终端字号 / 字体 (状态栏自绘下拉) ----
   // 两者都是「本机显示偏好」，跟着浏览器走比存服务端更合理（手机和平板本就该不一样）。
-  var FONT_MIN = 8;
-  var FONT_MAX = 32;
+  // 原生 <select> 的弹出层由浏览器自己绘制，深色主题下那里的滚动条又白又宽、还改不动，
+  // 所以这里自绘下拉：面板、选中态、滚动条全部按本项目的深色配色来。
+  var FONT_SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32];
   var FONT_DEFAULT = 14;
-  var FONT_STEP = 1;
   var FONT_SIZE_LS = 'sshx_font_size';
   var FONT_FAMILY_LS = 'sshx_font_family';
   var FONT_FAMILY_DEFAULT = 'Consolas, "Courier New", monospace';
-  var FONT_CUSTOM = '__custom__';
-  // 全是等宽字体栈，末尾统一兜底 monospace：客户端缺哪个字体就自动往后退一级。
-  // xterm 按等宽字符算格子，选到比例字体一定会错位，所以列表里不放大黑/雅黑这类。
-  var FONT_PRESETS = [
-    { label: 'Consolas（默认）', value: FONT_FAMILY_DEFAULT },
-    { label: 'Cascadia Code', value: '"Cascadia Code", "Cascadia Mono", Consolas, monospace' },
-    { label: 'JetBrains Mono', value: '"JetBrains Mono", Consolas, monospace' },
-    { label: 'Fira Code', value: '"Fira Code", Consolas, monospace' },
-    { label: 'Source Code Pro', value: '"Source Code Pro", Consolas, monospace' },
-    { label: 'Menlo / Monaco', value: 'Menlo, Monaco, Consolas, monospace' },
-    { label: 'DejaVu Sans Mono', value: '"DejaVu Sans Mono", "Liberation Mono", monospace' },
-    { label: 'Ubuntu Mono', value: '"Ubuntu Mono", "DejaVu Sans Mono", monospace' },
-    { label: 'Sarasa Mono SC', value: '"Sarasa Mono SC", "Sarasa Mono", Consolas, monospace' },
-    { label: 'Noto Sans Mono CJK', value: '"Noto Sans Mono CJK SC", "Noto Sans Mono", monospace' },
-    { label: 'Courier New', value: '"Courier New", Courier, monospace' },
-    { label: '系统等宽', value: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
-    { label: '自定义…', value: FONT_CUSTOM }
+  // 候选字体：只把本机真的装了的挑出来给用户选，选了就一定有效果。
+  // xterm 按等宽字符算格子，比例字体（雅黑之类）一定会错位，所以只收等宽族。
+  var FONT_CANDIDATES = [
+    { label: 'Consolas', stack: 'Consolas, "Courier New", monospace', probe: 'Consolas' },
+    { label: '系统等宽', stack: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace', probe: '' },
+    { label: 'Courier New', stack: '"Courier New", Courier, monospace', probe: 'Courier New' },
+    { label: 'Lucida Console', stack: '"Lucida Console", Monaco, monospace', probe: 'Lucida Console' },
+    { label: 'Cascadia Code', stack: '"Cascadia Code", "Cascadia Mono", Consolas, monospace', probe: 'Cascadia Code' },
+    { label: 'Cascadia Mono', stack: '"Cascadia Mono", Consolas, monospace', probe: 'Cascadia Mono' },
+    { label: 'Menlo', stack: 'Menlo, Monaco, Consolas, monospace', probe: 'Menlo' },
+    { label: 'Monaco', stack: 'Monaco, Menlo, Consolas, monospace', probe: 'Monaco' },
+    { label: 'SF Mono', stack: '"SF Mono", Menlo, Consolas, monospace', probe: 'SF Mono' },
+    { label: 'DejaVu Sans Mono', stack: '"DejaVu Sans Mono", "Liberation Mono", monospace', probe: 'DejaVu Sans Mono' },
+    { label: 'Liberation Mono', stack: '"Liberation Mono", "DejaVu Sans Mono", monospace', probe: 'Liberation Mono' },
+    { label: 'Ubuntu Mono', stack: '"Ubuntu Mono", "DejaVu Sans Mono", monospace', probe: 'Ubuntu Mono' },
+    { label: 'Noto Sans Mono', stack: '"Noto Sans Mono", "DejaVu Sans Mono", monospace', probe: 'Noto Sans Mono' },
+    { label: '更纱黑体 Mono', stack: '"Sarasa Mono SC", "Sarasa Mono", monospace', probe: 'Sarasa Mono SC' },
+    { label: 'JetBrains Mono', stack: '"JetBrains Mono", Consolas, monospace', probe: 'JetBrains Mono' },
+    { label: 'Fira Code', stack: '"Fira Code", Consolas, monospace', probe: 'Fira Code' }
   ];
   var fontState = { size: FONT_DEFAULT, family: FONT_FAMILY_DEFAULT };
+  var sizePicker = null;
+  var famPicker = null;
+  var _fontItems = null;
 
-  function clampFontSize(px) {
+  function snapFontSize(px) {
     var n = parseInt(px, 10);
     if (isNaN(n)) return FONT_DEFAULT;
-    return Math.max(FONT_MIN, Math.min(FONT_MAX, n));
+    var best = FONT_SIZES[0];
+    var bestD = Infinity;
+    for (var i = 0; i < FONT_SIZES.length; i++) {
+      var d = Math.abs(FONT_SIZES[i] - n);
+      if (d < bestD) { best = FONT_SIZES[i]; bestD = d; }
+    }
+    return best;
   }
   function readFontState() {
     var s = FONT_DEFAULT;
     var f = FONT_FAMILY_DEFAULT;
     try {
       var v = localStorage.getItem(FONT_SIZE_LS);
-      if (v !== null && v !== '') s = clampFontSize(v);
+      if (v !== null && v !== '') s = snapFontSize(v);
       var ff = localStorage.getItem(FONT_FAMILY_LS);
       if (ff) f = String(ff);
     } catch (e) {}
@@ -1080,47 +1164,162 @@ window.renderWelcome = function (term) {
   }
   fontState = readFontState();
 
-  function isPresetFamily(v) {
-    for (var i = 0; i < FONT_PRESETS.length; i++) { if (FONT_PRESETS[i].value === v) return true; }
-    return false;
+  // 用 canvas 量字宽判断字体是否真的可用：不存在的字体浏览器会静默回退，
+  // 三个基准族里只要有一个宽度变了，就说明这个字体确实参与渲染了。
+  var _fontAvail = {};
+  function fontAvailable(name) {
+    if (!name) return true;
+    if (name in _fontAvail) return _fontAvail[name];
+    var ok = false;
+    try {
+      var ctx = document.createElement('canvas').getContext('2d');
+      var sample = 'mmmmmmwwwwww0123';
+      var bases = ['monospace', 'serif', 'sans-serif'];
+      for (var i = 0; i < bases.length; i++) {
+        ctx.font = '16px ' + bases[i];
+        var w1 = ctx.measureText(sample).width;
+        ctx.font = '16px "' + name + '", ' + bases[i];
+        var w2 = ctx.measureText(sample).width;
+        if (Math.abs(w1 - w2) > 0.01) { ok = true; break; }
+      }
+    } catch (e) {
+      ok = true;
+    }
+    _fontAvail[name] = ok;
+    return ok;
   }
 
-  function buildFontOptions() {
-    var sizeSel = el('fontSizeSel');
-    if (sizeSel && !sizeSel.options.length) {
-      for (var i = FONT_MIN; i <= FONT_MAX; i++) {
-        var o = document.createElement('option');
-        o.value = String(i);
-        o.textContent = String(i);
-        sizeSel.appendChild(o);
+  function findCandidate(stack) {
+    for (var i = 0; i < FONT_CANDIDATES.length; i++) {
+      if (FONT_CANDIDATES[i].stack === stack) return FONT_CANDIDATES[i];
+    }
+    return null;
+  }
+  function fontLabelFor(stack) {
+    var c = findCandidate(stack);
+    if (c) return c.label;
+    var first = String(stack).split(',')[0].replace(/["']/g, '').replace(/^\s+|\s+$/g, '');
+    return first || '自定义';
+  }
+
+  // 只列出本机可用的字体；当前生效的字体不在列表里时补一项，别让用户看不到自己选了什么
+  function fontItems() {
+    if (_fontItems) return _fontItems;
+    var list = [];
+    for (var i = 0; i < FONT_CANDIDATES.length; i++) {
+      var c = FONT_CANDIDATES[i];
+      if (!c.probe || fontAvailable(c.probe)) {
+        list.push({ label: c.label, value: c.stack, fontFamily: c.stack });
       }
     }
-    var famSel = el('fontFamilySel');
-    if (famSel && !famSel.options.length) {
-      FONT_PRESETS.forEach(function (p) {
-        var o = document.createElement('option');
-        o.value = p.value;
-        o.textContent = p.label;
-        famSel.appendChild(o);
+    if (list.length < 2) { // 检测不靠谱（老浏览器）就整列给出，总比空列表好
+      list = FONT_CANDIDATES.map(function (c) {
+        return { label: c.label, value: c.stack, fontFamily: c.stack };
       });
     }
+    var has = false;
+    for (var k = 0; k < list.length; k++) { if (list[k].value === fontState.family) { has = true; break; } }
+    if (!has) {
+      list.unshift({ label: fontLabelFor(fontState.family) + '（当前）', value: fontState.family, fontFamily: fontState.family });
+    }
+    _fontItems = list;
+    return list;
+  }
+
+  // ---- 轻量下拉：按钮 + 固定定位面板，点外面/Esc/窗口变化就收起 ----
+  var _pickers = [];
+  function closePickers(except) {
+    for (var i = 0; i < _pickers.length; i++) {
+      if (_pickers[i] !== except) _pickers[i].hide();
+    }
+  }
+  function createPicker(btn, menu, render) {
+    var inst = {
+      btn: btn, menu: menu, isOpen: false,
+      show: function () {
+        closePickers(inst);
+        render();
+        menu.classList.add('show');
+        var r = btn.getBoundingClientRect();
+        // 状态栏在最底下，面板一律向上弹；上方空间不够就压高度
+        var spaceAbove = r.top - 12;
+        menu.style.maxHeight = Math.max(140, Math.min(280, spaceAbove)) + 'px';
+        var mw = menu.offsetWidth;
+        var left = Math.min(Math.max(4, r.left), Math.max(4, window.innerWidth - mw - 4));
+        menu.style.left = left + 'px';
+        menu.style.bottom = (window.innerHeight - r.top + 6) + 'px';
+        inst.isOpen = true;
+        btn.classList.add('open');
+        var act = menu.querySelector('.fs-opt.active');
+        if (act) {
+          var top = act.offsetTop;
+          var bottom = top + act.offsetHeight;
+          if (top < menu.scrollTop) menu.scrollTop = top;
+          else if (bottom > menu.scrollTop + menu.clientHeight) menu.scrollTop = bottom - menu.clientHeight;
+        }
+      },
+      hide: function () {
+        menu.classList.remove('show');
+        inst.isOpen = false;
+        btn.classList.remove('open');
+      },
+      toggle: function () { if (inst.isOpen) inst.hide(); else inst.show(); }
+    };
+    btn.onclick = function (e) { e.stopPropagation(); inst.toggle(); };
+    _pickers.push(inst);
+    return inst;
+  }
+
+  function renderSizeMenu() {
+    var menu = el('fontSizeMenu');
+    if (!menu) return;
+    menu.innerHTML = '';
+    FONT_SIZES.forEach(function (s) {
+      var row = document.createElement('div');
+      row.className = 'fs-opt' + (s === fontState.size ? ' active' : '');
+      row.textContent = String(s);
+      row.onclick = function (e) {
+        e.stopPropagation();
+        if (sizePicker) sizePicker.hide();
+        commitFont({ size: s });
+      };
+      menu.appendChild(row);
+    });
+  }
+
+  function renderFamilyMenu() {
+    var menu = el('fontFamilyMenu');
+    if (!menu) return;
+    menu.innerHTML = '';
+    fontItems().forEach(function (it) {
+      var row = document.createElement('div');
+      row.className = 'fs-opt' + (it.value === fontState.family ? ' active' : '');
+      row.textContent = it.label;
+      row.style.fontFamily = it.fontFamily; // 直接用该字体显示名字，选之前就能看出样子
+      row.title = it.label;
+      row.onclick = function (e) {
+        e.stopPropagation();
+        if (famPicker) famPicker.hide();
+        commitFont({ family: it.value });
+      };
+      menu.appendChild(row);
+    });
   }
 
   function syncFontUI() {
-    var sizeSel = el('fontSizeSel');
-    if (sizeSel) sizeSel.value = String(fontState.size);
-    var preset = isPresetFamily(fontState.family);
-    var famSel = el('fontFamilySel');
-    if (famSel) famSel.value = preset ? fontState.family : FONT_CUSTOM;
-    var custom = el('fontFamilyCustom');
-    if (custom) {
-      custom.style.display = preset ? 'none' : '';
-      if (!preset) custom.value = fontState.family;
+    var sizeLabel = el('fontSizeLabel');
+    if (sizeLabel) sizeLabel.textContent = String(fontState.size);
+    var famLabel = el('fontFamilyLabel');
+    if (famLabel) {
+      famLabel.textContent = fontLabelFor(fontState.family);
+      famLabel.title = fontState.family;
     }
     var dec = el('fontDec');
-    if (dec) dec.disabled = fontState.size <= FONT_MIN;
+    if (dec) dec.disabled = fontState.size <= FONT_SIZES[0];
     var inc = el('fontInc');
-    if (inc) inc.disabled = fontState.size >= FONT_MAX;
+    if (inc) inc.disabled = fontState.size >= FONT_SIZES[FONT_SIZES.length - 1];
+    if (sizePicker && sizePicker.isOpen) renderSizeMenu();
+    if (famPicker && famPicker.isOpen) renderFamilyMenu();
   }
 
   // xterm 5.x 用 options 代理，4.x 用 setOption，两套都兼容着写
@@ -1155,10 +1354,13 @@ window.renderWelcome = function (term) {
 
   var fontApplyTimer = null;
   function commitFont(patch) {
-    if (patch && patch.size !== undefined) fontState.size = clampFontSize(patch.size);
+    var familyChanged = false;
+    if (patch && patch.size !== undefined) fontState.size = snapFontSize(patch.size);
     if (patch && patch.family !== undefined) {
-      fontState.family = String(patch.family || '').replace(/^\s+|\s+$/g, '') || FONT_FAMILY_DEFAULT;
+      var f = String(patch.family || '').replace(/^\s+|\s+$/g, '') || FONT_FAMILY_DEFAULT;
+      if (f !== fontState.family) { fontState.family = f; familyChanged = true; }
     }
+    if (familyChanged) _fontItems = null; // 「（当前）」那项要跟着重算
     try {
       localStorage.setItem(FONT_SIZE_LS, String(fontState.size));
       localStorage.setItem(FONT_FAMILY_LS, fontState.family);
@@ -1173,7 +1375,7 @@ window.renderWelcome = function (term) {
         t.fontDirty = true;
       }
     });
-    // 下拉连选 / Ctrl+滚轮连发时合并成一次，避免连续 fit + resize 刷屏
+    // 滚轮连发时合并成一次，避免连续 fit + resize 刷屏
     if (fontApplyTimer) clearTimeout(fontApplyTimer);
     fontApplyTimer = setTimeout(function () {
       fontApplyTimer = null;
@@ -1182,52 +1384,72 @@ window.renderWelcome = function (term) {
     diag('[font] ' + fontState.size + 'px / ' + fontState.family);
   }
 
+  // 按档位步进，保证任何时候的取值都在下拉列表里
+  function stepFontSize(dir) {
+    var i = FONT_SIZES.indexOf(fontState.size);
+    if (i < 0) i = FONT_SIZES.indexOf(snapFontSize(fontState.size));
+    var ni = Math.max(0, Math.min(FONT_SIZES.length - 1, i + dir));
+    if (ni === i) { syncFontUI(); return; }
+    commitFont({ size: FONT_SIZES[ni] });
+  }
+
   (function bindFontControls() {
-    buildFontOptions();
+    var sizeToggle = el('fontSizeToggle');
+    var sizeMenu = el('fontSizeMenu');
+    var famToggle = el('fontFamilyToggle');
+    var famMenu = el('fontFamilyMenu');
+    if (sizeToggle && sizeMenu) sizePicker = createPicker(sizeToggle, sizeMenu, renderSizeMenu);
+    if (famToggle && famMenu) famPicker = createPicker(famToggle, famMenu, renderFamilyMenu);
+
     syncFontUI();
 
-    var sizeSel = el('fontSizeSel');
-    if (sizeSel) sizeSel.onchange = function () { commitFont({ size: sizeSel.value }); };
-
     var dec = el('fontDec');
-    if (dec) dec.onclick = function () { commitFont({ size: fontState.size - FONT_STEP }); };
+    if (dec) dec.onclick = function () { stepFontSize(-1); };
     var inc = el('fontInc');
-    if (inc) inc.onclick = function () { commitFont({ size: fontState.size + FONT_STEP }); };
+    if (inc) inc.onclick = function () { stepFontSize(1); };
 
-    var famSel = el('fontFamilySel');
+    // 手动输入字体名：只给列表里没有的字体留个口子，平时不占地方
+    var customBtn = el('fontCustomBtn');
     var custom = el('fontFamilyCustom');
-    if (famSel) famSel.onchange = function () {
-      if (famSel.value === FONT_CUSTOM) {
-        // 选「自定义」先不落地，等用户把字体名敲进来
-        if (custom) {
-          custom.style.display = '';
-          custom.value = isPresetFamily(fontState.family) ? '' : fontState.family;
-          custom.focus();
-          custom.select();
-        }
-        return;
-      }
-      commitFont({ family: famSel.value });
-      if (custom) custom.style.display = 'none';
-    };
+    var famBox = el('fontFamilyPicker');
+    function showCustom() {
+      if (!custom || !famBox) return;
+      famBox.style.display = 'none';
+      if (customBtn) customBtn.style.display = 'none';
+      custom.style.display = '';
+      custom.value = fontState.family;
+      custom.focus();
+      custom.select();
+    }
+    function hideCustom() {
+      if (!custom || !famBox) return;
+      custom.style.display = 'none';
+      famBox.style.display = '';
+      if (customBtn) customBtn.style.display = '';
+    }
+    if (customBtn) customBtn.onclick = function (e) { e.stopPropagation(); showCustom(); };
     if (custom) {
       custom.onkeydown = function (e) {
         if (e.key === 'Enter') {
           var v = custom.value.trim();
-          if (!v) return;
-          commitFont({ family: v });
-          custom.blur();
+          if (v) commitFont({ family: v });
+          hideCustom();
         } else if (e.key === 'Escape') {
-          custom.value = '';
-          syncFontUI();
-          custom.blur();
+          hideCustom();
         }
       };
-      // 空着离开就退回原字体，别让下拉停在「自定义」上
-      custom.onblur = function () {
-        if (!custom.value.trim()) syncFontUI();
-      };
+      custom.onblur = function () { if (custom.style.display !== 'none') hideCustom(); };
     }
+
+    // 点空白处 / Esc / 窗口尺寸变化时收起面板
+    document.addEventListener('click', function (e) {
+      if (e.target && e.target.closest && e.target.closest('.fs-picker')) return;
+      closePickers(null);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closePickers(null);
+    });
+    window.addEventListener('resize', function () { closePickers(null); });
 
     // Ctrl + 滚轮缩放（终端内），capture 阶段抢在 xterm 的滚轮滚动之前拦下
     var termBox = el('terminals');
@@ -1236,7 +1458,7 @@ window.renderWelcome = function (term) {
         if (!e.ctrlKey) return;
         e.preventDefault();
         e.stopPropagation();
-        commitFont({ size: fontState.size + (e.deltaY < 0 ? FONT_STEP : -FONT_STEP) });
+        stepFontSize(e.deltaY < 0 ? 1 : -1);
       }, { passive: false, capture: true });
     }
   })();

@@ -506,24 +506,40 @@ body { overflow: hidden; }
 .fs-btn:active { background: #0e639c; border-color: #0e639c; color: #fff; }
 .fs-btn:disabled { color: #666; cursor: default; background: #1e1e1e; border-color: #333; }
 .fs-btn:disabled:hover { background: #1e1e1e; border-color: #333; }
-.fs-sel {
+
+/* 触发按钮（自绘 select，原生 select 的弹出层改不了样式） */
+.fs-picker { position: relative; flex: 0 0 auto; display: flex; }
+.fs-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   height: 18px;
-  padding: 0 2px;
+  padding: 0 4px;
+  max-width: 92px;
   background: #1e1e1e;
   color: #e0e0e0;
   border: 1px solid #3c3c3c;
   border-radius: 4px;
   font-size: 12px;
+  line-height: 1;
   cursor: pointer;
   outline: none;
-  max-width: 170px;
 }
-.fs-sel:hover { background: #2a2a2a; border-color: #555; }
-.fs-sel:focus { border-color: #0e639c; }
-.fs-family { max-width: 150px; }
+.fs-toggle:hover { background: #2a2a2a; border-color: #555; }
+.fs-toggle.open { border-color: #0e639c; }
+.fs-toggle-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-caret {
+  flex: 0 0 auto;
+  width: 0; height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid #9aa0a6;
+  margin-top: 1px;
+}
+.fs-toggle-wide { max-width: 148px; }
 .fs-custom {
   height: 18px;
-  width: 150px;
+  width: 148px;
   padding: 0 6px;
   background: #1e1e1e;
   color: #e0e0e0;
@@ -533,6 +549,50 @@ body { overflow: hidden; }
   outline: none;
 }
 
+/* 下拉面板：深色 + 6px 细滚动条，和整体配色一致 */
+.fs-menu {
+  position: fixed;
+  display: none;
+  z-index: 9500;
+  min-width: 84px;
+  max-height: 232px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #252526;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  padding: 3px 0;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  scrollbar-width: thin;
+  scrollbar-color: #4a4a4a transparent;
+}
+.fs-menu.show { display: block; }
+.fs-menu.show.fs-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+  min-width: 104px;
+  padding: 4px;
+}
+.fs-opt {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #d4d4d4;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-opt:hover { background: #094771; color: #fff; }
+.fs-opt.active { background: #0e639c; color: #fff; }
+.fs-menu-grid .fs-opt { padding: 4px 0; text-align: center; border-radius: 3px; }
+.fs-menu-family { min-width: 150px; max-width: 230px; }
+.fs-menu::-webkit-scrollbar { width: 6px; }
+.fs-menu::-webkit-scrollbar-track { background: transparent; }
+.fs-menu::-webkit-scrollbar-thumb { background: #4a4a4a; border-radius: 3px; }
+.fs-menu::-webkit-scrollbar-thumb:hover { background: #6a6a6a; }
+.fs-menu::-webkit-scrollbar-corner { background: transparent; }
+
 /* 640px 移动端：状态栏继续显示但内容简化 */
 @media (max-width: 640px) {
   #statusLeft { font-size: 11px; }
@@ -540,7 +600,9 @@ body { overflow: hidden; }
   #encodingSel { font-size: 11px; }
   .font-ctrl { margin-right: 6px; gap: 3px; }
   .fs-btn { display: none; }            /* 手机空间紧，只留下拉 */
-  #fontSizeSel { font-size: 11px; }
-  #fontFamilySel { font-size: 11px; max-width: 104px; }
-  .fs-custom { width: 96px; font-size: 11px; }
+  .fs-toggle { font-size: 11px; }
+  .fs-toggle-wide { max-width: 104px; }
+  .fs-custom { width: 104px; font-size: 11px; }
+  .fs-menu { max-height: 200px; }
+  .fs-opt { font-size: 12px; }
 }
